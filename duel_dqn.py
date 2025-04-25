@@ -89,8 +89,13 @@ class model(nn.Module):
         return q
 
 
+def soft_update(q, q_target, tau=0.001):
+    for param, target_param in zip(q.parameters(), q_target.parameters()):
+        target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
+
+
 def train(q, q_target, memory, batch_size, gamma, optimizer):
-    q.train()
+    print("train()")
     s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
     s = np.array(s).squeeze()
     s_prime = np.array(s_prime).squeeze()
@@ -107,6 +112,7 @@ def train(q, q_target, memory, batch_size, gamma, optimizer):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+    soft_update(q, q_target)
     return loss
 
 
@@ -131,7 +137,7 @@ def main(env, q, q_target, optimizer, scheduler):
     loss = 0.0
     start_time = time.perf_counter()
 
-    for k in range(1000):
+    for k in range(1, 1001):
         s = arrange(env.reset())
         done = False
 
@@ -139,7 +145,6 @@ def main(env, q, q_target, optimizer, scheduler):
             # if eps > np.random.rand():
             #    a = env.action_space.sample()
             # else:
-            q.eval()
             with torch.no_grad():
                 a = q(s).argmax().item()
             s_prime, r, done, _ = env.step(a)
@@ -154,7 +159,7 @@ def main(env, q, q_target, optimizer, scheduler):
                 loss += train(q, q_target, memory, batch_size, gamma, optimizer)
                 t += 1
             if t % update_interval == 0:
-                copy_weights(q, q_target)
+                # copy_weights(q, q_target)
                 torch.save(q.state_dict(), "mario_q.pth")
                 torch.save(q_target.state_dict(), "mario_q_target.pth")
         scheduler.step()
@@ -180,9 +185,13 @@ if __name__ == "__main__":
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = wrap_mario(env)
     # print(f"{env.action_space.n=}") # 12
-    q = model(n_frame, env.action_space.n, device).compile().to(device)
-    q_target = model(n_frame, env.action_space.n, device).compile().to(device)
+    q = model(n_frame, env.action_space.n, device).to(device)
+    q_target = model(n_frame, env.action_space.n, device).to(device)
 
+    q.compile()
+    q_target.compile()
+
+    q.train()  # keep noisy layers in training mode
     q_target.eval()
 
     optimizer = optim.Adam(q.parameters(), lr=0.0002)
