@@ -14,12 +14,27 @@ import time
 
 from wrappers import *
 
+from torchrl.modules import NoisyLinear
+
+torch.set_float32_matmul_precision("high")
+
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available():
+    device = "mps"
+print(device)
+
 
 def arrange(s):
     if not type(s) == "numpy.ndarray":
         s = np.array(s)
+    # print("arrange(): ", s)
     assert len(s.shape) == 3
     ret = np.transpose(s, (2, 0, 1))
+    ret = torch.tensor(np.expand_dims(ret, 0), dtype=torch.float32).to("cuda")
+    # print("arrange(): ", ret.shape)
+    return ret
     return np.expand_dims(ret, 0)
 
 
@@ -42,42 +57,47 @@ class model(nn.Module):
         super(model, self).__init__()
         self.layer1 = nn.Conv2d(n_frame, 32, 8, 4)
         self.layer2 = nn.Conv2d(32, 64, 3, 1)
-        self.fc = nn.Linear(20736, 512)
-        self.q = nn.Linear(512, n_action)
-        self.v = nn.Linear(512, 1)
+
+        # Dynamically calculate the flattened size
+        dummy_input = torch.zeros(1, n_frame, 84, 84)  # Example input size
+        with torch.no_grad():
+            dummy_output = self.layer2(self.layer1(dummy_input))
+        flattened_size = dummy_output.numel()  # Total elements in the output
+
+        # self.fc = nn.Linear(flattened_size, 512)
+        # self.q = nn.Linear(512, n_action)
+        # self.v = nn.Linear(512, 1)
+        # Replace with NoisyLinear from torchrl
+        self.fc = NoisyLinear(flattened_size, 512)
+        self.q = NoisyLinear(512, n_action)
+        self.v = NoisyLinear(512, 1)
 
         self.device = device
-        self.seq = nn.Sequential(self.layer1, self.layer2, self.fc, self.q, self.v)
 
-        self.seq.apply(init_weights)
+        torch.nn.init.xavier_uniform_(self.layer1.weight)
+        torch.nn.init.xavier_uniform_(self.layer2.weight)
 
     def forward(self, x):
-        if type(x) != torch.Tensor:
-            x = torch.FloatTensor(x).to(self.device)
         x = torch.relu(self.layer1(x))
         x = torch.relu(self.layer2(x))
-        x = x.view(-1, 20736)
+        x = x.flatten(start_dim=1)
         x = torch.relu(self.fc(x))
         adv = self.q(x)
         v = self.v(x)
-        q = v + (adv - 1 / adv.shape[-1] * adv.sum(-1, keepdim=True))
+        q = v + (adv - adv.mean())
 
         return q
 
 
-def init_weights(m):
-    if type(m) == nn.Conv2d:
-        torch.nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.01)
-
-
-def train(q, q_target, memory, batch_size, gamma, optimizer, device):
+def train(q, q_target, memory, batch_size, gamma, optimizer):
+    q.train()
     s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
     s = np.array(s).squeeze()
     s_prime = np.array(s_prime).squeeze()
+    s_prime = torch.tensor(s_prime, dtype=torch.float32).to(device)
     a_max = q(s_prime).max(1)[1].unsqueeze(-1)
-    r = torch.FloatTensor(r).unsqueeze(-1).to(device)
-    done = torch.FloatTensor(done).unsqueeze(-1).to(device)
+    r = torch.tensor(r, dtype=torch.float32).unsqueeze(-1).to(device)
+    done = torch.tensor(done, dtype=torch.float32).unsqueeze(-1).to(device)
     with torch.no_grad():
         y = r + gamma * q_target(s_prime).gather(1, a_max) * done
     a = torch.tensor(a).unsqueeze(-1).to(device)
@@ -95,13 +115,13 @@ def copy_weights(q, q_target):
     q_target.load_state_dict(q_dict)
 
 
-def main(env, q, q_target, optimizer, device):
+def main(env, q, q_target, optimizer, scheduler):
     t = 0
     gamma = 0.99
     batch_size = 256
 
     N = 50000
-    eps = 0.001
+    # eps = 0.001
     memory = replay_memory(N)
     update_interval = 50
     print_interval = 10
@@ -111,32 +131,33 @@ def main(env, q, q_target, optimizer, device):
     loss = 0.0
     start_time = time.perf_counter()
 
-    for k in range(1000000):
+    for k in range(1000):
         s = arrange(env.reset())
         done = False
 
         while not done:
-            if eps > np.random.rand():
-                a = env.action_space.sample()
-            else:
-                if device == "cpu":
-                    a = np.argmax(q(s).detach().numpy())
-                else:
-                    a = np.argmax(q(s).cpu().detach().numpy())
+            # if eps > np.random.rand():
+            #    a = env.action_space.sample()
+            # else:
+            q.eval()
+            with torch.no_grad():
+                a = q(s).argmax().item()
             s_prime, r, done, _ = env.step(a)
             s_prime = arrange(s_prime)
             total_score += r
+            # reward shaping
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
             memory.push((s, float(r), int(a), s_prime, int(1 - done)))
             s = s_prime
             stage = env.unwrapped._stage
             if len(memory) > 2000:
-                loss += train(q, q_target, memory, batch_size, gamma, optimizer, device)
+                loss += train(q, q_target, memory, batch_size, gamma, optimizer)
                 t += 1
             if t % update_interval == 0:
                 copy_weights(q, q_target)
                 torch.save(q.state_dict(), "mario_q.pth")
                 torch.save(q_target.state_dict(), "mario_q_target.pth")
+        scheduler.step()
 
         if k % print_interval == 0:
             time_spent, start_time = (
@@ -144,15 +165,8 @@ def main(env, q, q_target, optimizer, device):
                 time.perf_counter(),
             )
             print(
-                "%s |Epoch : %d | score : %f | loss : %.2f | stage : %d | time spent: %f"
-                % (
-                    device,
-                    k,
-                    total_score / print_interval,
-                    loss / print_interval,
-                    stage,
-                    time_spent,
-                )
+                f"Epoch: {k} | Score: {total_score / print_interval:.6f} | "
+                f"Loss: {loss / print_interval:.2f} | Stage: {stage} | Time Spent: {time_spent:.6f} | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
             )
             score_lst.append(total_score / print_interval)
             total_score = 0
@@ -165,14 +179,13 @@ if __name__ == "__main__":
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = wrap_mario(env)
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
-    q = model(n_frame, env.action_space.n, device).to(device)
-    q_target = model(n_frame, env.action_space.n, device).to(device)
-    optimizer = optim.Adam(q.parameters(), lr=0.0001)
-    print(device)
+    # print(f"{env.action_space.n=}") # 12
+    q = model(n_frame, env.action_space.n, device).compile().to(device)
+    q_target = model(n_frame, env.action_space.n, device).compile().to(device)
 
-    main(env, q, q_target, optimizer, device)
+    q_target.eval()
+
+    optimizer = optim.Adam(q.parameters(), lr=0.0002)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
+
+    main(env, q, q_target, optimizer, scheduler)
