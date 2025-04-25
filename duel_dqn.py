@@ -139,7 +139,10 @@ def main(env, q, q_target, optimizer, device):
                 torch.save(q_target.state_dict(), "mario_q_target.pth")
 
         if k % print_interval == 0:
-            time_spent, start_time = time.perf_counter() - start_time, time.perf_counter()
+            time_spent, start_time = (
+                time.perf_counter() - start_time,
+                time.perf_counter(),
+            )
             print(
                 "%s |Epoch : %d | score : %f | loss : %.2f | stage : %d | time spent: %f"
                 % (
@@ -162,11 +165,11 @@ if __name__ == "__main__":
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = wrap_mario(env)
-    device = 'cpu'
+    device = "cpu"
     if torch.cuda.is_available():
-        device = 'cuda'
+        device = "cuda"
     elif torch.backends.mps.is_available():
-        device = 'mps'
+        device = "mps"
     q = model(n_frame, env.action_space.n, device).to(device)
     q_target = model(n_frame, env.action_space.n, device).to(device)
     optimizer = optim.Adam(q.parameters(), lr=0.0001)
