@@ -155,10 +155,11 @@ def main(env, q, q_target, optimizer, scheduler):
             memory.push((s, float(r), int(a), s_prime, int(1 - done)))
             s = s_prime
             stage = env.unwrapped._stage
-            if len(memory) > 2000:
+            # print(f"{len(memory)}")
+            if len(memory) > batch_size:
                 loss += train(q, q_target, memory, batch_size, gamma, optimizer)
                 t += 1
-            if t % update_interval == 0:
+            if (t + 1) % update_interval == 0:
                 # copy_weights(q, q_target)
                 torch.save(q.state_dict(), "mario_q.pth")
                 torch.save(q_target.state_dict(), "mario_q_target.pth")
