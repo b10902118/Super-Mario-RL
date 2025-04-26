@@ -1,15 +1,14 @@
 import pickle
 import random
 import numpy as np
+import torch
 
 random.seed(42)
 np.random.seed(42)
-
+torch.manual_seed(42)
 from collections import deque
 
 import gym_super_mario_bros
-
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -20,7 +19,6 @@ import time
 from wrappers import *
 
 from torchrl.modules import NoisyLinear
-from torchrl.data import ReplayBuffer, LazyTensorStorage
 from tensordict import TensorDict
 
 torch.set_float32_matmul_precision("high")
@@ -133,7 +131,6 @@ class BatchCollector(BatchStorage):
         return self.buffer  # Only valid entries
 
 
-"""
 class ReplayBuffer(BatchStorage):
     def __init__(self, max_size, batch_size):
         super().__init__(max_size, "cuda")
@@ -162,10 +159,9 @@ class ReplayBuffer(BatchStorage):
                 "ReplayBuffer is not full. Cannot sample until it has enough samples."
             )
         # Randomly sample a batch of size batch_size
-        # indices = np.random.choice(self.n, self.batch_size, replace=False)
-        batch = self.buffer[: self.batch_size]
+        indices = np.random.choice(self.n, self.batch_size, replace=False)
+        batch = self.buffer[indices]
         return batch
-"""
 
 
 class model(nn.Module):
@@ -245,12 +241,12 @@ def main(env, q, q_target, optimizer, scheduler):
     # eps = 0.001
     # memory = replay_memory(N)
     cpu_buffer = BatchCollector(batch_size)
-    # replay_buffer = ReplayBuffer(N, batch_size=batch_size)
-    replay_buffer = ReplayBuffer(
-        storage=LazyTensorStorage(N, device=device), batch_size=batch_size
-    )
+    replay_buffer = ReplayBuffer(N, batch_size=batch_size)
+    # replay_buffer = ReplayBuffer(
+    #    storage=LazyTensorStorage(N, device=device), batch_size=batch_size
+    # )
     update_interval = 50
-    print_interval = 10
+    print_interval = 1
 
     score_lst = []
     total_score = 0.0
@@ -278,18 +274,18 @@ def main(env, q, q_target, optimizer, scheduler):
             # print(s.dtype) #float32
 
             # minimal speed drop
-            replay_buffer.add(
-                {
-                    "s": torch.from_numpy(s),
-                    "r": torch.tensor([r], dtype=torch.float32),
-                    "a": torch.tensor([a], dtype=torch.int8),
-                    "s_prime": torch.from_numpy(s_prime),
-                    "done": torch.tensor([done], dtype=torch.int8),
-                }
-            )
-            # cpu_buffer.add(s, r, a, s_prime, done)
-            # if cpu_buffer.is_full():
-            #    replay_buffer.extend(cpu_buffer.flush())
+            # replay_buffer.add(
+            #    {
+            #        "s": torch.from_numpy(s),
+            #        "r": torch.tensor([r], dtype=torch.float32),
+            #        "a": torch.tensor([a], dtype=torch.int8),
+            #        "s_prime": torch.from_numpy(s_prime),
+            #        "done": torch.tensor([done], dtype=torch.int8),
+            #    }
+            # )
+            cpu_buffer.add(s, r, a, s_prime, done)
+            if cpu_buffer.is_full():
+                replay_buffer.extend(cpu_buffer.flush())
             s = s_prime
             stage = env.unwrapped._stage
             # print(f"{len(memory)}")
@@ -326,6 +322,7 @@ def main(env, q, q_target, optimizer, scheduler):
 if __name__ == "__main__":
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
+    env.seed(42)
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = wrap_mario(env)
     # print(f"{env.action_space.n=}") # 12
