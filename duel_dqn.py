@@ -15,6 +15,8 @@ import time
 from wrappers import *
 
 from torchrl.modules import NoisyLinear
+from torchrl.data import ReplayBuffer, LazyTensorStorage
+from tensordict import tensorclass
 
 torch.set_float32_matmul_precision("high")
 
@@ -27,15 +29,17 @@ print(device)
 
 
 def arrange(s):
-    if not type(s) == "numpy.ndarray":
-        s = np.array(s)
-    # print("arrange(): ", s)
-    assert len(s.shape) == 3
+    # if not type(s) == "numpy.ndarray":
+    #    s = np.array(s)
+    # (84, 84 ,4)
+    # print("arrange(): ", s.shape)
+    # print(type(s)) # numpy.ndarray
+    # assert len(s.shape) == 3
     ret = np.transpose(s, (2, 0, 1))
     ret = np.expand_dims(ret, 0)
-    # print("arrange(): ", ret.shape)
     return ret
-    return np.expand_dims(ret, 0)
+    # print("arrange(): ", ret.shape)
+    return torch.tensor(ret, dtype=torch.float32)
 
 
 class replay_memory(object):
@@ -105,7 +109,7 @@ def train(q, q_target, memory, batch_size, gamma, optimizer):
     r = torch.tensor(r, dtype=torch.float32).unsqueeze(-1).to(device)
     done = torch.tensor(done, dtype=torch.float32).unsqueeze(-1).to(device)
     with torch.no_grad():
-        y = r + gamma * q_target(s_prime).gather(1, a_max) * done
+        y = r + gamma * q_target(s_prime).gather(1, a_max) * (1 - done)
     a = torch.tensor(a).unsqueeze(-1).to(device)
     q_value = torch.gather(q(s), dim=1, index=a.view(-1, 1).long())
 
@@ -113,7 +117,7 @@ def train(q, q_target, memory, batch_size, gamma, optimizer):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    soft_update(q, q_target)
+    # soft_update(q, q_target)
     return loss
 
 
@@ -130,6 +134,7 @@ def main(env, q, q_target, optimizer, scheduler):
     N = 50000
     # eps = 0.001
     memory = replay_memory(N)
+    # memory = ReplayBuffer(storage=LazyTensorStorage(N), pin_memory=True)
     update_interval = 50
     print_interval = 10
 
@@ -137,14 +142,15 @@ def main(env, q, q_target, optimizer, scheduler):
     total_score = 0.0
     loss = 0.0
     start_time = time.perf_counter()
+    step_count = 0
 
-    for k in range(1, 1001):
+    for k in range(1, 10000 + 1):
         s = arrange(env.reset())
         done = False
 
         while not done:
             # if eps > np.random.rand():
-            #    a = env.action_space.sample()
+            # a = env.action_space.sample()
             # else:
             with torch.no_grad():
                 a = q(torch.tensor(s, dtype=torch.float32).to(device)).argmax().item()
@@ -153,7 +159,7 @@ def main(env, q, q_target, optimizer, scheduler):
             total_score += r
             # reward shaping
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
-            memory.push((s, float(r), int(a), s_prime, int(1 - done)))
+            memory.push((s, float(r), int(a), s_prime, done))
             s = s_prime
             stage = env.unwrapped._stage
             # print(f"{len(memory)}")
@@ -161,23 +167,24 @@ def main(env, q, q_target, optimizer, scheduler):
                 loss += train(q, q_target, memory, batch_size, gamma, optimizer)
                 t += 1
             if (t + 1) % update_interval == 0:
-                # copy_weights(q, q_target)
+                copy_weights(q, q_target)
                 torch.save(q.state_dict(), "mario_q.pth")
                 torch.save(q_target.state_dict(), "mario_q_target.pth")
-        scheduler.step()
+            step_count += 1
+        # scheduler.step()
 
         if k % print_interval == 0:
-            time_spent, start_time = (
-                time.perf_counter() - start_time,
-                time.perf_counter(),
-            )
+            time_spent = time.perf_counter() - start_time
+            # 20 for train, 130 for no train, 150 for pure random
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.6f} | "
-                f"Loss: {loss / print_interval:.2f} | Stage: {stage} | Time Spent: {time_spent:.6f} | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
+                f"Loss: {loss / print_interval:.2f} | Stage: {stage} | Time Spent: {time_spent:.6f}| Speed: {step_count / time_spent} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
             )
             score_lst.append(total_score / print_interval)
             total_score = 0
             loss = 0.0
+            start_time = time.perf_counter()
+            step_count = 0
             pickle.dump(score_lst, open("score.p", "wb"))
 
 
