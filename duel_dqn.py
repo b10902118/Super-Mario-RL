@@ -32,7 +32,7 @@ def arrange(s):
     # print("arrange(): ", s)
     assert len(s.shape) == 3
     ret = np.transpose(s, (2, 0, 1))
-    ret = torch.tensor(np.expand_dims(ret, 0), dtype=torch.float32).to("cuda")
+    ret = np.expand_dims(ret, 0)
     # print("arrange(): ", ret.shape)
     return ret
     return np.expand_dims(ret, 0)
@@ -95,10 +95,11 @@ def soft_update(q, q_target, tau=0.001):
 
 
 def train(q, q_target, memory, batch_size, gamma, optimizer):
-    print("train()")
+    # print("train()")
     s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
     s = np.array(s).squeeze()
     s_prime = np.array(s_prime).squeeze()
+    s = torch.tensor(s, dtype=torch.float32).to(device)
     s_prime = torch.tensor(s_prime, dtype=torch.float32).to(device)
     a_max = q(s_prime).max(1)[1].unsqueeze(-1)
     r = torch.tensor(r, dtype=torch.float32).unsqueeze(-1).to(device)
@@ -146,7 +147,7 @@ def main(env, q, q_target, optimizer, scheduler):
             #    a = env.action_space.sample()
             # else:
             with torch.no_grad():
-                a = q(s).argmax().item()
+                a = q(torch.tensor(s, dtype=torch.float32).to(device)).argmax().item()
             s_prime, r, done, _ = env.step(a)
             s_prime = arrange(s_prime)
             total_score += r
