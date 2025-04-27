@@ -17,6 +17,7 @@ from wrappers import *
 from torchrl.modules import NoisyLinear
 
 from torchrl.data import ReplayBuffer, LazyTensorStorage, ListStorage
+from torchrl.data.replay_buffers.samplers import PrioritizedSampler
 from tensordict import TensorDict
 import imageio
 from PIL import Image
@@ -91,8 +92,9 @@ def soft_update(q, q_target, tau=0.001):
         target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
 
 
-def train(q, q_target, batch, batch_size, gamma, optimizer):
+def train(q, q_target, replay_buffer, batch_size, gamma, optimizer):
     # s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
+    batch, info = replay_buffer.sample()
     s, r, a, s_prime, done = (
         batch["s"],
         batch["r"],
@@ -111,11 +113,15 @@ def train(q, q_target, batch, batch_size, gamma, optimizer):
     q_value = torch.gather(q(s), dim=1, index=a.unsqueeze_(-1)).squeeze(-1)
     # q_value.shape = (batch_size)
 
-    loss = F.smooth_l1_loss(q_value, y).mean()
+    loss = F.smooth_l1_loss(q_value, y).mean() * info["_weight"]
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     # soft_update(q, q_target)
+
+    deltas = y - q_value
+    replay_buffer.update_priority(index=info["indices"], priority=deltas.abs())
+
     return loss
 
 
@@ -132,7 +138,9 @@ def main(env, q, q_target, optimizer, scheduler):
     N = 50000
     # eps = 0.001
     replay_buffer = ReplayBuffer(
-        storage=LazyTensorStorage(N, device=device), batch_size=batch_size
+        storage=LazyTensorStorage(N, device=device),
+        sampler=PrioritizedSampler(N, 0.6, 0.4),
+        batch_size=batch_size,
     )
     update_interval = 50
     eval_episode = 100
@@ -173,12 +181,12 @@ def main(env, q, q_target, optimizer, scheduler):
             stage = max(stage, env.unwrapped._stage)
             # print(f"{len(memory)}")
             if len(replay_buffer) > batch_size:
-                batch = replay_buffer.sample()
+                # batch = replay_buffer.sample()
                 # if cpu to gpu pin_memory slower (29 -> 25)
                 # batch = TensorDict(replay_buffer.sample(), batch_size)
                 # batch.pin_memory()
                 # batch = batch.to(device, non_blocking=True)
-                loss += train(q, q_target, batch, batch_size, gamma, optimizer)
+                loss += train(q, q_target, replay_buffer, batch_size, gamma, optimizer)
                 t += 1
             if (t + 1) % update_interval == 0:
                 copy_weights(q, q_target)
@@ -257,7 +265,7 @@ if __name__ == "__main__":
     q.train()  # keep noisy layers in training mode
     q_target.eval()
 
-    optimizer = optim.Adam(q.parameters(), lr=0.0002)
+    optimizer = optim.Adam(q.parameters(), lr=0.00015)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
 
     training_start_time = time.perf_counter()
