@@ -6,6 +6,7 @@ https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.
 import os
 
 import numpy as np
+import torch
 
 os.environ.setdefault("PATH", "")
 from collections import deque
@@ -257,33 +258,38 @@ class LazyFrames(object):
         This object should only be converted to numpy array before being passed to the model.
         You'd not believe how complex the previous solution was."""
         self._frames = frames
-        self._out = None
 
     def _force(self):
-        if self._out is None:
-            # frames[0].shape = (84, 84, 1) # 1 for grayscale
-            self._out = np.concatenate(self._frames, axis=-1)
-            self._frames = None
-        return self._out
+        # always re-stack a new numpy array, only store the reference to the frames
+        return np.transpose(np.concatenate(self._frames, axis=-1), (2, 0, 1))
+        # if self._out is None:
+        # frames[0].shape = (84, 84, 1) # 1 for grayscale
+        # stack frames to (4, 84, 84)
+        # self._frames = None
+        # return self._out
 
+    # allow to be used as a numpy array
     def __array__(self, dtype=None):
         out = self._force()
         if dtype is not None:
             out = out.astype(dtype)
         return out
 
-    def __len__(self):
-        return len(self._force())
+    # allow to be used as a pytorch tensor
+    # def __torch_function__(self, func, types, args=(), kwargs=None):
+    #    return torch.from_numpy(self.__array__(dtype=kwargs.get("dtype", None)))
 
     def __getitem__(self, i):
-        return self._force()[i]
+        return self.frame(i)
 
     def count(self):
-        frames = self._force()
-        return frames.shape[frames.ndim - 1]
+        return len(self._frames)
+        # frames = self._force()
+        # return frames.shape[frames.ndim - 1]
 
     def frame(self, i):
-        return self._force()[..., i]
+        return self._frames[i].copy()  # avoid modifying the original one
+        # return self._force()[..., i]
 
 
 def make_atari(env_id, max_episode_steps=None):
