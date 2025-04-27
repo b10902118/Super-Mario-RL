@@ -94,7 +94,7 @@ def soft_update(q, q_target, tau=0.001):
 
 def train(q, q_target, replay_buffer, batch_size, gamma, optimizer):
     # s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
-    batch, info = replay_buffer.sample()
+    batch, info = replay_buffer.sample(return_info=True)
     s, r, a, s_prime, done = (
         batch["s"],
         batch["r"],
@@ -113,14 +113,14 @@ def train(q, q_target, replay_buffer, batch_size, gamma, optimizer):
     q_value = torch.gather(q(s), dim=1, index=a.unsqueeze_(-1)).squeeze(-1)
     # q_value.shape = (batch_size)
 
-    loss = F.smooth_l1_loss(q_value, y).mean() * info["_weight"]
+    loss = (F.smooth_l1_loss(q_value, y) * info["_weight"].to(device)).mean()
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     # soft_update(q, q_target)
 
     deltas = y - q_value
-    replay_buffer.update_priority(index=info["indices"], priority=deltas.abs())
+    replay_buffer.update_priority(index=info["index"], priority=deltas.abs())
 
     return loss
 
