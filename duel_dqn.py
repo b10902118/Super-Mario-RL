@@ -2,11 +2,6 @@ import pickle
 import random
 import numpy as np
 
-random.seed(42)
-np.random.seed(42)
-
-from collections import deque
-
 import gym_super_mario_bros
 
 import torch
@@ -22,6 +17,10 @@ from wrappers import *
 from torchrl.modules import NoisyLinear
 from torchrl.data import ReplayBuffer, LazyTensorStorage
 from tensordict import TensorDict
+import imageio
+from PIL import Image
+import os
+from datetime import datetime
 
 torch.set_float32_matmul_precision("high")
 
@@ -32,140 +31,20 @@ elif torch.backends.mps.is_available():
     device = "mps"
 print(device)
 
+# Get current time in MM_DD_HH_MM format
+current_time = datetime.now().strftime("%m_%d_%H_%M")
+
+# Create the folder under ./recordings
+recordings_dir = os.path.join("recordings", current_time)
+os.makedirs(recordings_dir, exist_ok=True)
+print(f"Created directory: {recordings_dir}")
+
 
 def arrange(s):
-    # if not type(s) == "numpy.ndarray":
-    #    s = np.array(s)
-    # (84, 84 ,4)
-    # print("arrange(): ", s.shape)
-    # print(type(s)) # numpy.ndarray
-    # assert len(s.shape) == 3
+    # s.shape = (84, 84 ,4)
+    s = np.array(s)  # LazyFrame to numpy array
     ret = np.transpose(s, (2, 0, 1))
-    # ret = np.expand_dims(ret, 0)
     return ret
-    # print("arrange(): ", ret.shape)
-    return torch.tensor(ret, dtype=torch.float32)
-
-
-class replay_memory(object):
-    def __init__(self, N):
-        self.memory = deque(maxlen=N)
-
-    def push(self, transition):
-        self.memory.append(transition)
-
-    def sample(self, n):
-        return random.sample(self.memory, n)
-
-    def __len__(self):
-        return len(self.memory)
-
-
-class BatchStorage:
-    def __init__(self, size, device):
-        self.size = size
-
-        pin_memory = False
-        if device != "cuda":
-            pin_memory = True
-
-        # Preallocate pinned memory
-        self.buffer = TensorDict(
-            {
-                "s": torch.empty(
-                    size,
-                    *(4, 84, 84),
-                    dtype=torch.float32,
-                    device=device,
-                    pin_memory=pin_memory,
-                ),
-                "r": torch.empty(
-                    size, 1, dtype=torch.float32, device=device, pin_memory=pin_memory
-                ),
-                "a": torch.empty(
-                    size, 1, dtype=torch.int8, device=device, pin_memory=pin_memory
-                ),
-                "s_prime": torch.empty(
-                    size,
-                    *(4, 84, 84),
-                    dtype=torch.float32,
-                    device=device,
-                    pin_memory=pin_memory,
-                ),
-                "done": torch.empty(
-                    size, 1, dtype=torch.int8, device=device, pin_memory=pin_memory
-                ),
-            },
-            batch_size=[size],
-        )
-
-        self.ptr = 0  # current insert pointer
-
-
-class BatchCollector(BatchStorage):
-    def __init__(self, batch_size):
-        super().__init__(batch_size, "cpu")
-
-    def add(self, s, r, a, s_prime, done):
-        """Add a single sample to the batch."""
-        if self.ptr >= self.size:
-            raise RuntimeError(
-                "BatchCollector is full. Please flush it before adding more."
-            )
-
-        # Insert one sample
-        self.buffer[self.ptr] = {
-            "s": torch.from_numpy(s),
-            "r": torch.tensor(r, dtype=torch.float32),
-            "a": torch.tensor(a, dtype=torch.int8),
-            "s_prime": torch.from_numpy(s_prime),
-            "done": torch.tensor(done, dtype=torch.int8),
-        }
-
-        self.ptr += 1
-
-    def is_full(self):
-        return self.ptr == self.size
-
-    def flush(self):
-        """Return the collected batch and reset."""
-        self.ptr = 0
-        return self.buffer  # Only valid entries
-
-
-"""
-class ReplayBuffer(BatchStorage):
-    def __init__(self, max_size, batch_size):
-        super().__init__(max_size, "cuda")
-        self.n = 0  # number of samples in the buffer
-        self.batch_size = batch_size
-
-    def __len__(self):
-        return self.n
-
-    def extend(self, batch):
-        l = batch.shape[0]
-        if self.ptr + l > self.size:
-            l1 = self.size - self.ptr
-            l2 = l - l1
-            self.buffer[self.ptr :] = batch[:l1]
-            self.buffer[:l2] = batch[l1:]
-            self.ptr = l2
-        else:
-            self.buffer[self.ptr : self.ptr + l] = batch
-            self.ptr += l
-        self.n = min(self.n + l, self.size)
-
-    def sample(self):
-        if self.n < self.batch_size:
-            raise RuntimeError(
-                "ReplayBuffer is not full. Cannot sample until it has enough samples."
-            )
-        # Randomly sample a batch of size batch_size
-        # indices = np.random.choice(self.n, self.batch_size, replace=False)
-        batch = self.buffer[: self.batch_size]
-        return batch
-"""
 
 
 class model(nn.Module):
@@ -243,23 +122,22 @@ def main(env, q, q_target, optimizer, scheduler):
 
     N = 50000
     # eps = 0.001
-    # memory = replay_memory(N)
-    cpu_buffer = BatchCollector(batch_size)
-    # replay_buffer = ReplayBuffer(N, batch_size=batch_size)
     replay_buffer = ReplayBuffer(
         storage=LazyTensorStorage(N, device=device), batch_size=batch_size
     )
     update_interval = 50
-    print_interval = 10
+    eval_episode = 100
+    print_interval = 50
 
-    score_lst = []
     total_score = 0.0
     loss = 0.0
     start_time = time.perf_counter()
     step_count = 0
+    stage = 1
 
-    for k in range(1, 10000 + 1):
-        s = arrange(env.reset())
+    for k in range(1, 5000 + 1):
+        s = env.reset()  # observation is LazyFrame
+        s = arrange(s)
         done = False
 
         while not done:
@@ -291,15 +169,15 @@ def main(env, q, q_target, optimizer, scheduler):
             # if cpu_buffer.is_full():
             #    replay_buffer.extend(cpu_buffer.flush())
             s = s_prime
-            stage = env.unwrapped._stage
+            stage = max(stage, env.unwrapped._stage)
             # print(f"{len(memory)}")
             if len(replay_buffer) > batch_size:
                 loss += train(q, q_target, replay_buffer, batch_size, gamma, optimizer)
                 t += 1
             if (t + 1) % update_interval == 0:
                 copy_weights(q, q_target)
-                # torch.save(q.state_dict(), "mario_q.pth")
-                # torch.save(q_target.state_dict(), "mario_q_target.pth")
+            #    torch.save(q.state_dict(), "mario_q.pth")
+            #    torch.save(q_target.state_dict(), "mario_q_target.pth")
             step_count += 1
             # if step_count == 512:
             #    time_spent = time.perf_counter() - start_time
@@ -307,6 +185,7 @@ def main(env, q, q_target, optimizer, scheduler):
             #    step_count = 0
             #    start_time = time.perf_counter()
         # scheduler.step()
+        # soft_update(q, q_target, tau=0.01)
 
         if k % print_interval == 0:
             time_spent = time.perf_counter() - start_time
@@ -315,12 +194,48 @@ def main(env, q, q_target, optimizer, scheduler):
                 f"Epoch: {k} | Score: {total_score / print_interval:.6f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {stage} | Time Spent: {time_spent:.6f}| Speed: {step_count / time_spent} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
             )
-            score_lst.append(total_score / print_interval)
             total_score = 0
             loss = 0.0
             start_time = time.perf_counter()
             step_count = 0
-            pickle.dump(score_lst, open("score.p", "wb"))
+            stage = 1
+
+        if k % eval_episode == 0:
+            frames = []
+            done = False
+            s = arrange(env.reset())
+            q.eval()
+            score = 0
+            while not done:
+                frames.append(s[3] * 255)
+                # frames.append(env.render(mode="rgb_array"))
+                with torch.no_grad():
+                    s_expanded = np.expand_dims(s, 0)
+                    a = (
+                        q(torch.tensor(s_expanded, dtype=torch.float32).to(device))
+                        .argmax()
+                        .item()
+                    )
+                s_prime, r, done, _ = env.step(a)
+                s_prime = arrange(s_prime)
+                score += r
+                s = s_prime
+            frames.append(s[3] * 255)
+            # frames.append(env.render(mode="rgb_array"))
+            filepath = os.path.join(recordings_dir, f"{k}.gif")
+            # imagedir = os.path.join("recordings", f"{k}")
+            # if os.path.exists(imagedir):
+            #    for file in os.listdir(imagedir):
+            #        os.remove(os.path.join(imagedir, file))
+            # else:
+            #    os.makedirs(imagedir, exist_ok=True)
+            # frames = [Image.fromarray(frame) for frame in frames]
+            # for i in range(len(frames)):
+            #    frames[i].save(os.path.join(imagedir, f"{i}.jpg"))
+            imageio.mimsave(filepath, frames)
+            print(f"Score {score}, Saved gif to {filepath}")
+            # print(f"Saved {len(frames)} frames to {imagedir}")
+            q.train()
 
 
 if __name__ == "__main__":

@@ -1,21 +1,14 @@
-"""
-Code from OpenAI baseline
-https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
-"""
-
-import os
-
 import numpy as np
+import os
 
 os.environ.setdefault("PATH", "")
 from collections import deque
-
-import cv2
 import gym
 from gym import spaces
+import cv2
 
 cv2.ocl.setUseOpenCL(False)
-from gym.wrappers import TimeLimit
+from .wrappers import TimeLimit
 
 
 class NoopResetEnv(gym.Wrapper):
@@ -152,6 +145,7 @@ class WarpFrame(gym.ObservationWrapper):
     def __init__(self, env, width=84, height=84, grayscale=True, dict_space_key=None):
         """
         Warp frames to 84x84 as done in the Nature paper and later work.
+
         If the environment uses dictionary observations, `dict_space_key` can be specified which indicates which
         observation should be warped.
         """
@@ -204,7 +198,9 @@ class WarpFrame(gym.ObservationWrapper):
 class FrameStack(gym.Wrapper):
     def __init__(self, env, k):
         """Stack k last frames.
+
         Returns lazy array, which is much more memory efficient.
+
         See Also
         --------
         baselines.common.atari_wrappers.LazyFrames
@@ -254,14 +250,15 @@ class LazyFrames(object):
         """This object ensures that common frames between the observations are only stored once.
         It exists purely to optimize memory usage which can be huge for DQN's 1M frames replay
         buffers.
+
         This object should only be converted to numpy array before being passed to the model.
+
         You'd not believe how complex the previous solution was."""
         self._frames = frames
         self._out = None
 
     def _force(self):
         if self._out is None:
-            # frames[0].shape = (84, 84, 1) # 1 for grayscale
             self._out = np.concatenate(self._frames, axis=-1)
             self._frames = None
         return self._out
@@ -297,7 +294,7 @@ def make_atari(env_id, max_episode_steps=None):
 
 
 def wrap_deepmind(
-    env, episode_life=True, clip_rewards=True, frame_stack=True, scale=True
+    env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False
 ):
     """Configure environment for DeepMind-style Atari."""
     if episode_life:
@@ -311,52 +308,4 @@ def wrap_deepmind(
         env = ClipRewardEnv(env)
     if frame_stack:
         env = FrameStack(env, 4)
-    return env
-
-
-class EpisodicLifeMario(gym.Wrapper):
-    def __init__(self, env):
-        """Make end-of-life == end-of-episode, but only reset on true game over.
-        Done by DeepMind for the DQN and co. since it helps value estimation.
-        """
-        gym.Wrapper.__init__(self, env)
-        self.lives = 0
-        self.was_real_done = True
-
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        self.was_real_done = done
-        # check current lives, make loss of life terminal,
-        # then update lives to handle bonus lives
-        lives = self.env.unwrapped._life
-        if lives < self.lives and lives > 0:
-            # for Qbert sometimes we stay in lives == 0 condition for a few frames
-            # so it's important to keep lives > 0, so that we only reset once
-            # the environment advertises done.
-            done = True
-        self.lives = lives
-        return obs, reward, done, info
-
-    def reset(self, **kwargs):
-        """Reset only when lives are exhausted.
-        This way all states are still reachable even though lives are episodic,
-        and the learner need not know about any of this behind-the-scenes.
-        """
-        if self.was_real_done:
-            obs = self.env.reset(**kwargs)
-        else:
-            # no-op step to advance from terminal/lost life state
-            obs, _, _, _ = self.env.step(0)
-        self.lives = self.env.unwrapped._life
-        return obs
-
-
-def wrap_mario(env):
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeMario(env)
-    env = WarpFrame(env)
-    env = ScaledFloatFrame(env)
-    # env = custom_reward(env)
-    env = FrameStack(env, 4)
     return env
