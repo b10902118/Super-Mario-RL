@@ -159,6 +159,7 @@ def main(env, q, q_target, optimizer, scheduler):
             # print(s.dtype) #float32
 
             # minimal speed drop (71 -> 68)
+            # TensorDict no gain
             replay_buffer.add(
                 {
                     "s": torch.from_numpy(s),
@@ -212,8 +213,7 @@ def main(env, q, q_target, optimizer, scheduler):
             q.eval()
             score = 0
             while not done:
-                # (84, 84, 1) -> (84, 84)
-                frames.append(s[3].squeeze(-1) * 255)
+                frames.append(s[3] * 255)
                 # frames.append(env.render(mode="rgb_array"))
                 with torch.no_grad():
                     s_expanded = np.expand_dims(s, 0)
