@@ -173,6 +173,10 @@ def main(env, q, q_target, optimizer, scheduler):
             # print(f"{len(memory)}")
             if len(replay_buffer) > batch_size:
                 batch = replay_buffer.sample()
+                # if cpu to gpu pin_memory slower (29 -> 25)
+                # batch = TensorDict(replay_buffer.sample(), batch_size)
+                # batch.pin_memory()
+                # batch = batch.to(device, non_blocking=True)
                 loss += train(q, q_target, batch, batch_size, gamma, optimizer)
                 t += 1
             if (t + 1) % update_interval == 0:
@@ -253,7 +257,7 @@ if __name__ == "__main__":
     q.train()  # keep noisy layers in training mode
     q_target.eval()
 
-    optimizer = optim.Adam(q.parameters(), lr=0.0001)
+    optimizer = optim.Adam(q.parameters(), lr=0.0002)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
 
     training_start_time = time.perf_counter()
