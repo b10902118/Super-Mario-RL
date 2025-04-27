@@ -152,7 +152,7 @@ def main(env, q, q_target, optimizer, scheduler):
     step_count = 0
     stage = 1
 
-    for k in range(1, 5000 + 1):
+    for k in range(1, 10000 + 1):
         s = env.reset()
         done = False
 
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     q.train()  # keep noisy layers in training mode
     q_target.eval()
 
-    optimizer = optim.Adam(q.parameters(), lr=0.00015)
+    optimizer = optim.Adam(q.parameters(), lr=0.0002)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
 
     training_start_time = time.perf_counter()
