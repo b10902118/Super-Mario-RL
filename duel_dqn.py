@@ -145,8 +145,7 @@ def main(env, q, q_target, optimizer, scheduler):
     stage = 1
 
     for k in range(1, 5000 + 1):
-        s = env.reset()  # observation is LazyFrame
-        s = np.array(s)
+        s = env.reset()
         done = False
 
         while not done:
@@ -154,13 +153,12 @@ def main(env, q, q_target, optimizer, scheduler):
                 s_expanded = np.expand_dims(s, 0)
                 a = q(torch.from_numpy(s_expanded).to(device)).argmax().item()
             s_prime, r, done, _ = env.step(a)
-            s_prime = np.array(s_prime)
             total_score += r
             # reward shaping
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
             # print(s.dtype) #float32
 
-            # minimal speed drop
+            # minimal speed drop (71 -> 68)
             replay_buffer.add(
                 {
                     "s": torch.from_numpy(s),

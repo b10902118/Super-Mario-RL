@@ -47,7 +47,7 @@ class ReplayBuffer:
         self.batch_size = batch_size
         self.buffer = deque(maxlen=max_size)
 
-    def push(self, transition):
+    def add(self, transition):
         self.buffer.append(transition)
 
     def sample(self, size=None, to_device=None):
@@ -57,10 +57,29 @@ class ReplayBuffer:
             raise ValueError("Not enough samples in the buffer to sample from.")
         batch = random.sample(self.buffer, size)
         # Convert to TensorDict
+        s = torch.from_numpy(np.array([np.array(b["s"]) for b in batch]))
+        s_prime = torch.from_numpy(np.array([np.array(b["s_prime"]) for b in batch]))
+
+        # Extremely slow: 9 steps/s
+        # batch_dict = {"s": [], "r": [], "a": [], "s_prime": [], "done": []}
+        # for b in batch:
+        #    batch_dict["s"].append(np.array(b["s"]))
+        #    batch_dict["r"].append(b["r"])
+        #    batch_dict["a"].append(b["a"])
+        #    batch_dict["s_prime"].append(np.array(b["s_prime"]))
+        #    batch_dict["done"].append(b["done"])
+        # batch_dict["s"] = torch.from_numpy(np.array(batch_dict["s"]))
+        # batch_dict["s_prime"] = torch.from_numpy(np.array(batch_dict["s_prime"]))
+        # batch_dict["r"] = torch.tensor(batch_dict["r"], dtype=torch.float32)
+        # batch_dict["a"] = torch.tensor(batch_dict["a"], dtype=torch.long)
+        # batch_dict["done"] = torch.tensor(batch_dict["done"], dtype=torch.long)
+
         batch_dict = {
             "s": torch.from_numpy(np.array([np.array(b["s"]) for b in batch])),
+            # "s": torch.from_numpy(np.zeros((self.batch_size, 84, 84))),
             "r": torch.tensor([b["r"] for b in batch], dtype=torch.float32),
             "a": torch.tensor([b["a"] for b in batch], dtype=torch.long),
+            # "s_prime": torch.from_numpy(np.zeros((self.batch_size, 84, 84))),
             "s_prime": torch.from_numpy(
                 np.array([np.array(b["s_prime"]) for b in batch])
             ),
@@ -195,7 +214,7 @@ def main(env, q, q_target, optimizer, scheduler):
             # print(s.dtype) #float32
 
             # minimal speed drop
-            replay_buffer.push(
+            replay_buffer.add(
                 {
                     "s": s,
                     "r": r,
@@ -210,9 +229,9 @@ def main(env, q, q_target, optimizer, scheduler):
             s = s_prime
             stage = max(stage, env.unwrapped._stage)
             # print(f"{len(memory)}")
-            if batch is not None:
-                loss += train(q, q_target, batch, batch_size, gamma, optimizer)
-                t += 1
+            # if batch is not None:
+            #    loss += train(q, q_target, batch, batch_size, gamma, optimizer)
+            #    t += 1
             if len(replay_buffer) > batch_size:
                 batch = replay_buffer.sample(to_device=device)
             if (t + 1) % update_interval == 0:
@@ -244,11 +263,10 @@ def main(env, q, q_target, optimizer, scheduler):
         if k % eval_episode == 0:
             frames = []
             done = False
-            s = arrange(env.reset())
             q.eval()
             score = 0
             while not done:
-                frames.append(s[3] * 255)
+                frames.append(s[3].squeeze(-1) * 255)
                 # frames.append(env.render(mode="rgb_array"))
                 with torch.no_grad():
                     s_expanded = np.expand_dims(s, 0)
@@ -258,7 +276,6 @@ def main(env, q, q_target, optimizer, scheduler):
                         .item()
                     )
                 s_prime, r, done, _ = env.step(a)
-                s_prime = arrange(s_prime)
                 score += r
                 s = s_prime
             # frames.append(env.render(mode="rgb_array"))
@@ -282,7 +299,7 @@ if __name__ == "__main__":
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
-    env = wrap_mario(env)
+    env = wrap_mario_lazy(env)
     # print(f"{env.action_space.n=}") # 12
     q = model(n_frame, env.action_space.n, device).to(device)
     q_target = model(n_frame, env.action_space.n, device).to(device)

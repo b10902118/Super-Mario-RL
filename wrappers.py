@@ -202,7 +202,7 @@ class WarpFrame(gym.ObservationWrapper):
         return obs
 
 
-class FrameStack(gym.Wrapper):
+class FrameStackLazy(gym.Wrapper):
     def __init__(self, env, k):
         """Stack k last frames.
         Returns lazy array, which is much more memory efficient.
@@ -235,6 +235,40 @@ class FrameStack(gym.Wrapper):
     def _get_ob(self):
         assert len(self.frames) == self.k
         return LazyFrames(list(self.frames))
+
+
+class FrameStack(gym.Wrapper):
+    def __init__(self, env, k):
+        """Stack k last frames.
+        Returns lazy array, which is much more memory efficient.
+        See Also
+        --------
+        baselines.common.atari_wrappers.LazyFrames
+        """
+        gym.Wrapper.__init__(self, env)
+        self.k = k
+        self.frames = deque([], maxlen=k)
+        shp = env.observation_space.shape
+        self.observation_space = spaces.Box(
+            low=0,
+            high=255,
+            shape=(shp[:-1] + (shp[-1] * k,)),
+            dtype=env.observation_space.dtype,
+        )
+
+    def stack(self):
+        return np.transpose(np.concatenate(self.frames, axis=-1), (2, 0, 1))
+
+    def reset(self):
+        ob = self.env.reset()
+        for _ in range(self.k):
+            self.frames.append(ob)
+        return self.stack()
+
+    def step(self, action):
+        ob, reward, done, info = self.env.step(action)
+        self.frames.append(ob)
+        return self.stack(), reward, done, info
 
 
 class ScaledFloatFrame(gym.ObservationWrapper):
@@ -355,6 +389,17 @@ class EpisodicLifeMario(gym.Wrapper):
             obs, _, _, _ = self.env.step(0)
         self.lives = self.env.unwrapped._life
         return obs
+
+
+def wrap_mario_lazy(env):
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeMario(env)
+    env = WarpFrame(env)
+    env = ScaledFloatFrame(env)
+    # env = custom_reward(env)
+    env = FrameStackLazy(env, 4)
+    return env
 
 
 def wrap_mario(env):
