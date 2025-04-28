@@ -257,7 +257,16 @@ def main(env, q, q_target, optimizer, scheduler):
             )
 
 
+import argparse
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train a Dueling DQN on Super Mario Bros."
+    )
+    parser.add_argument(
+        "--lr", type=float, default=0.0002, help="Learning rate for the optimizer"
+    )
+    args = parser.parse_args()
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
@@ -272,7 +281,7 @@ if __name__ == "__main__":
     q.train()  # keep noisy layers in training mode
     q_target.eval()
 
-    optimizer = optim.Adam(q.parameters(), lr=0.0002)
+    optimizer = optim.Adam(q.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
 
     training_start_time = time.perf_counter()
