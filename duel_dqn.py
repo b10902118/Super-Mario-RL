@@ -141,7 +141,7 @@ def main(env, q, q_target, optimizer, scheduler):
     gamma = 0.99
     batch_size = 256
 
-    N = 500
+    N = 50000
     # eps = 0.001
     replay_buffer = ReplayBuffer(
         storage=LazyTensorStorage(N, device=device),
