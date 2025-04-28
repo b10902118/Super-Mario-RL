@@ -46,7 +46,12 @@ class model(nn.Module):
     def __init__(self, n_frame, n_action, device):
         super(model, self).__init__()
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(n_frame, 32, 8, 4), nn.ReLU(), nn.Conv2d(32, 64, 3, 1), nn.ReLU()
+            nn.Conv2d(n_frame, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
         )
 
         # Dynamically calculate the flattened size
@@ -54,6 +59,7 @@ class model(nn.Module):
         with torch.no_grad():
             dummy_output = self.conv_layers(dummy_input)
         flattened_size = dummy_output.numel()
+        print(f"Flattened size: {flattened_size}")  # 3136
 
         # self.fc = nn.Linear(flattened_size, 512)
         # self.q = nn.Linear(512, n_action)
@@ -135,7 +141,7 @@ def main(env, q, q_target, optimizer, scheduler):
     gamma = 0.99
     batch_size = 256
 
-    N = 50000
+    N = 500
     # eps = 0.001
     replay_buffer = ReplayBuffer(
         storage=LazyTensorStorage(N, device=device),
