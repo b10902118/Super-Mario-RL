@@ -218,7 +218,8 @@ def main(env, q, q_target, optimizer, scheduler):
         if k % eval_episode == 0:
             frames = []
             done = False
-            s = env.reset()
+            s = env.reset(force=True)
+            # print(f"Start {env.env.unwrapped._life=} {env.lives=}")
             q.eval()
             score = 0
             while not done:
@@ -234,6 +235,7 @@ def main(env, q, q_target, optimizer, scheduler):
                 s_prime, r, done, _ = env.step(a)
                 score += r
                 s = s_prime
+            # print(f"End {env.env.unwrapped._life=} {env.lives=}")
             # frames.append(env.render(mode="rgb_array"))
             filepath = os.path.join(recordings_dir, f"{k}.gif")
             # imagedir = os.path.join("recordings", f"{k}")

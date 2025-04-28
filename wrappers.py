@@ -259,8 +259,8 @@ class FrameStack(gym.Wrapper):
     def stack(self):
         return np.transpose(np.concatenate(self.frames, axis=-1), (2, 0, 1))
 
-    def reset(self):
-        ob = self.env.reset()
+    def reset(self, force=False):
+        ob = self.env.reset(force=force)
         for _ in range(self.k):
             self.frames.append(ob)
         return self.stack()
@@ -369,20 +369,17 @@ class EpisodicLifeMario(gym.Wrapper):
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
         lives = self.env.unwrapped._life
-        if lives < self.lives and lives > 0:
-            # for Qbert sometimes we stay in lives == 0 condition for a few frames
-            # so it's important to keep lives > 0, so that we only reset once
-            # the environment advertises done.
+        if lives < self.lives:
             done = True
         self.lives = lives
         return obs, reward, done, info
 
-    def reset(self, **kwargs):
+    def reset(self, force=False, **kwargs):
         """Reset only when lives are exhausted.
         This way all states are still reachable even though lives are episodic,
         and the learner need not know about any of this behind-the-scenes.
         """
-        if self.was_real_done:
+        if self.was_real_done or force:
             obs = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
