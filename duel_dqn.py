@@ -144,6 +144,7 @@ def main(env, q, q_target, optimizer, scheduler):
     )
     update_interval = 50
     eval_episode = 100
+    save_interval = 1000
     print_interval = 50
 
     total_score = 0.0
@@ -248,6 +249,12 @@ def main(env, q, q_target, optimizer, scheduler):
             print(f"Score {score}, Saved gif to {filepath}")
             # print(f"Saved {len(frames)} frames to {imagedir}")
             q.train()
+        if k % save_interval == 0:
+            torch.save(q.state_dict(), os.path.join(recordings_dir, "mario_q.pth"))
+            torch.save(
+                q_target.state_dict(),
+                os.path.join(recordings_dir, "mario_q_target.pth"),
+            )
 
 
 if __name__ == "__main__":
