@@ -180,6 +180,15 @@ class WarpFrame(gym.ObservationWrapper):
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
+        self.mask = np.ones((84,84), dtype=np.int8)
+        
+    
+        # Set the regions of interest to 0 (black) in the mask
+        regions_to_mask = [(7,5,17,6), (28, 7, 11, 4), (66,5,10,6)]
+        for region in regions_to_mask:
+            x, y, w, h = region
+            self.mask[y:y+h, x:x+w] = 0
+
     def observation(self, obs):
         if self._key is None:
             frame = obs
@@ -191,6 +200,7 @@ class WarpFrame(gym.ObservationWrapper):
         frame = cv2.resize(
             frame, (self._width, self._height), interpolation=cv2.INTER_AREA
         )
+        frame = cv2.bitwise_and(frame, frame, mask=self.mask)
         if self._grayscale:
             frame = np.expand_dims(frame, -1)
 

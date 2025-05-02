@@ -4,11 +4,12 @@ import numpy as np
 
 import gym_super_mario_bros
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+from gym_super_mario_bros.actions import COMPLEX_MOVEMENT, SIMPLE_MOVEMENT
 from nes_py.wrappers import JoypadSpace
 import time
 
@@ -23,6 +24,7 @@ import imageio
 from PIL import Image
 import os
 from datetime import datetime
+from copy import deepcopy
 
 torch.set_float32_matmul_precision("high")
 
@@ -44,6 +46,7 @@ print(f"Created directory: {recordings_dir}")
 EPSILON_START = 1.0
 EPSILON_END = 0.01
 EPSILON_DECAY = 0.9999
+EPSILON_BASE = 0.005
 
 
 class model(nn.Module):
@@ -67,7 +70,7 @@ class model(nn.Module):
         print(f"Flattened size: {flattened_size}")  # 3136
 
         if noisy:
-            self.fc = NoisyLinear(flattened_size, 512)
+            self.fc = nn.Linear(flattened_size, 512)
             self.q = NoisyLinear(512, n_action)
             self.v = NoisyLinear(512, 1)
         else:
@@ -95,7 +98,6 @@ class model(nn.Module):
         return q
 
     def reset_noise(self):
-        self.fc.reset_noise()
         self.q.reset_noise()
         self.v.reset_noise()
 
@@ -150,6 +152,27 @@ def hard_update(q, q_target):
     q_dict = q.state_dict()
     q_target.load_state_dict(q_dict)
 
+def get_epsilon(cur_score,mean_score, std_score):
+    # decide epsilon
+    # safety check
+    if mean_score == 0:
+        epsilon = 1
+    elif std_score == 0:
+        if cur_score < mean_score:
+            epsilon = 0.1 * (cur_score / mean_score)
+        else:
+            epsilon =  1
+    # multi-stage linear 
+    elif cur_score < mean_score:
+        epsilon = 0.05 * (cur_score / mean_score)
+    elif mean_score + std_score > cur_score > mean_score:
+        epsilon = 0.05 + (cur_score - mean_score) / std_score * 0.15
+    else:
+        epsilon = 0.2 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.8
+    
+    epsilon += EPSILON_BASE
+    return epsilon
+
 
 def main(
     env,
@@ -193,31 +216,34 @@ def main(
     step_count = 0
     max_stage = 1
 
-    if epsilon_greedy:
-        epsilon = EPSILON_START
+    mean_score = 0.0
+    std_score = 0.0 
 
     for k in range(1, episodes + 1):
         s = env.reset()
         done = False
+        cur_score = 0
 
         while not done:
             if epsilon_greedy:
-                # epsilon = max(0.1, 1 - k / (episodes * 0.5))
+                epsilon = get_epsilon(cur_score, mean_score, std_score)
                 if random.random() < epsilon:
-                    a = random.randint(0, env.action_space.n - 1)
+                    # a = random.randint(0, env.action_space.n - 1)
+                    a = random.choice([1, 2, 3, 4])
                 else:
                     with torch.no_grad():
                         s_expanded = np.expand_dims(s, 0)
                         a = q(torch.from_numpy(s_expanded).to(device)).argmax().item()
-                epsilon = max(EPSILON_END, epsilon * EPSILON_DECAY)
 
             else:
                 with torch.no_grad():
                     s_expanded = np.expand_dims(s, 0)
                     a = q(torch.from_numpy(s_expanded).to(device)).argmax().item()
 
-            s_prime, r, done, _ = env.step(a)
+            s_prime, r, done, info = env.step(a)
+            # {'coins': 2, 'flag_get': False, 'life': 0, 'score': 400, 'stage': 1, 'status': 'small', 'time': 398, 'world': 1, 'x_pos': 99, 'y_pos': 79}
             total_score += r
+            cur_score += r
 
             # reward shaping
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
@@ -256,13 +282,19 @@ def main(
             #    step_count = 0
             #    start_time = time.perf_counter()
 
+        prev_mean_score = mean_score
+        mean_score = ((k - 1) * mean_score + cur_score) / k
+        prev_Ex2 = std_score**2 + prev_mean_score**2
+        Ex2 = ((k - 1) * prev_Ex2 + cur_score**2) / k
+        std_score = math.sqrt(Ex2 - mean_score**2)
+
         if k % print_interval == 0:
             time_spent = time.perf_counter() - start_time
             # 20 for train, 130 for no train, 150 for pure random
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                + (f" | Epsilon: {epsilon:.4f}" if epsilon_greedy else "")
+                + (f" | Mean: {mean_score:.2f}  Std: {std_score:.2f}" if epsilon_greedy else "")
             )
             total_score = 0
             loss = 0.0
@@ -340,7 +372,8 @@ if __name__ == "__main__":
 
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
-    env = JoypadSpace(env, COMPLEX_MOVEMENT)
+    # env = JoypadSpace(env, COMPLEX_MOVEMENT)
+    env = JoypadSpace(env, SIMPLE_MOVEMENT)
     env = wrap_mario(env)
     # print(f"{env.action_space.n=}") # 12
     q = model(n_frame, env.action_space.n, not args.eps, device).to(device)
