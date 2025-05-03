@@ -46,7 +46,7 @@ print(f"Created directory: {recordings_dir}")
 EPSILON_START = 1.0
 EPSILON_END = 0.01
 EPSILON_DECAY = 0.9999
-EPSILON_BASE = 0.005
+epsilon_base = 1 
 
 
 class model(nn.Module):
@@ -153,6 +153,7 @@ def hard_update(q, q_target):
     q_target.load_state_dict(q_dict)
 
 def get_epsilon(cur_score,mean_score, std_score):
+    global epsilon_base
     # decide epsilon
     # safety check
     if mean_score == 0:
@@ -164,14 +165,15 @@ def get_epsilon(cur_score,mean_score, std_score):
             epsilon =  1
     # multi-stage linear 
     elif cur_score < mean_score:
-        epsilon = 0.05 * (cur_score / mean_score)
+        epsilon = 0.04 * (cur_score / mean_score)
     elif mean_score + std_score > cur_score > mean_score:
-        epsilon = 0.05 + (cur_score - mean_score) / std_score * 0.15
+        epsilon = 0.04 + (cur_score - mean_score) / std_score * 0.06
     else:
-        epsilon = 0.2 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.8
+        epsilon = 0.1 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.1
     
-    epsilon += EPSILON_BASE
-    return epsilon
+    epsilon += epsilon_base
+    epsilon_base *= EPSILON_DECAY
+    return min(1, epsilon)
 
 
 def main(
@@ -185,12 +187,12 @@ def main(
     soft,
     no_prio,
     epsilon_greedy,
+    gamma,
     alpha=0.6,
     beta=0.4,
     hard_update_interval=50,
 ):
     t = 0
-    gamma = 0.99
     batch_size = 256
 
     prioritize = not no_prio
@@ -365,6 +367,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Use noisy layers for exploration",
+    )
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.63,
+        help="Discount factor for the Q-learning update",
     )
     args = parser.parse_args()
     args_dict = vars(args)
