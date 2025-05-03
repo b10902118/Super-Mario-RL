@@ -218,8 +218,7 @@ def main(
     step_count = 0
     max_stage = 1
 
-    mean_score = 0.0
-    std_score = 0.0 
+    last_400_scores = deque([0],maxlen=400)
 
     for k in range(1, episodes + 1):
         s = env.reset()
@@ -228,7 +227,7 @@ def main(
 
         while not done:
             if epsilon_greedy:
-                epsilon = get_epsilon(cur_score, mean_score, std_score)
+                epsilon = get_epsilon(cur_score, np.mean(last_400_scores), np.std(last_400_scores))
                 if random.random() < epsilon:
                     # a = random.randint(0, env.action_space.n - 1)
                     a = random.choice([1, 2, 3, 4])
@@ -284,11 +283,12 @@ def main(
             #    step_count = 0
             #    start_time = time.perf_counter()
 
-        prev_mean_score = mean_score
-        mean_score = ((k - 1) * mean_score + cur_score) / k
-        prev_Ex2 = std_score**2 + prev_mean_score**2
-        Ex2 = ((k - 1) * prev_Ex2 + cur_score**2) / k
-        std_score = math.sqrt(Ex2 - mean_score**2)
+        last_400_scores.append(cur_score)
+        #prev_mean_score = mean_score
+        #mean_score = ((k - 1) * mean_score + cur_score) / k
+        #prev_Ex2 = std_score**2 + prev_mean_score**2
+        #Ex2 = ((k - 1) * prev_Ex2 + cur_score**2) / k
+        #std_score = math.sqrt(Ex2 - mean_score**2)
 
         if k % print_interval == 0:
             time_spent = time.perf_counter() - start_time
@@ -296,7 +296,7 @@ def main(
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                + (f" | Mean: {mean_score:.2f}  Std: {std_score:.2f}" if epsilon_greedy else "")
+                + (f" | Mean: {np.mean(last_400_scores):.2f}  Std: {np.std(last_400_scores):.2f}" if epsilon_greedy else "")
             )
             total_score = 0
             loss = 0.0
