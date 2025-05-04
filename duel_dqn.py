@@ -45,7 +45,7 @@ print(f"Created directory: {recordings_dir}")
 
 EPSILON_START = 1.0
 EPSILON_END = 0.01
-EPSILON_DECAY = 0.999999
+EPSILON_DECAY = 0.9999  # 992
 epsilon_base = 1
 
 
@@ -159,30 +159,32 @@ def hard_update(q, q_target):
     q_target.load_state_dict(q_dict)
 
 
-def get_epsilon(cur_score, mean_score, std_score):
+def get_epsilon(cur_x, mean_x, std_x):
     global epsilon_base
     # decide epsilon
     # safety check
-    if mean_score == 0:
+    if mean_x == 0:
         epsilon = 1
-    elif std_score == 0:
-        if cur_score < mean_score:
-            epsilon = 0.1 * (cur_score / mean_score)
-        else:
-            epsilon = 1
     # multi-stage linear
-    elif cur_score < mean_score:
-        epsilon = 0.04 * (cur_score / mean_score)
-    elif mean_score + std_score > cur_score > mean_score:
-        epsilon = 0.04 + (cur_score - mean_score) / std_score * 0.06
+    elif cur_x < mean_x:
+        epsilon = 0.04 * (cur_x / mean_x)
+
+    # safety check
+    elif std_x == 0:
+        epsilon = 1
+    elif mean_x + std_x > cur_x > mean_x:
+        epsilon = 0.04 + (cur_x - mean_x) / std_x * 0.06
     else:
-        epsilon = (
-            0.1 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.1
-        )
+        epsilon = 0.1 + min((cur_x - mean_x - std_x), std_x) / std_x * 0.1
 
     epsilon += epsilon_base
     epsilon_base *= EPSILON_DECAY
     return min(1, epsilon)
+
+
+def calc_x(x_pos, stage):
+    # assume world 1
+    return 2000 * (stage - 1) + x_pos
 
 
 def main(
@@ -222,30 +224,30 @@ def main(
     big_count = 0
     green_count = 0
 
-    last_400_scores = deque([0], maxlen=400)
+    last_400_x = deque([0], maxlen=400)
     max_score = -10000000
     min_score = -max_score
     epsilon = EPSILON_START
 
     for k in range(1, episodes + 1):
         s = env.reset()
+        info = env.unwrapped._get_info()
         s = torch.from_numpy(s).to(device)
         done = False
         cur_score = 0
-        max_x = 0
-        max_r = 0
-        min_r = 0
-        prev_x_pos = 0
-        stay_count = 0
+        # max_x = info["x_pos"]
+        # max_r = 0
+        # min_r = 0
+        # prev_x_pos = 0
+        # stay_count = 0
         small = True
-        life = env.unwrapped._life
+        life = info["life"]
 
         while not done:
-            mean_score = np.mean(last_400_scores)
-            std_score = np.std(last_400_scores)
-
-            # epsilon = get_epsilon(cur_score, mean_score, std_score)
-            epsilon = max(epsilon * EPSILON_DECAY, EPSILON_END)
+            cur_x = calc_x(info["x_pos"], info["stage"])
+            mean_x = np.mean(last_400_x)
+            std_x = np.std(last_400_x)
+            epsilon = get_epsilon(cur_x, mean_x, std_x)
             if random.random() < epsilon:
                 # a = random.randint(0, env.action_space.n - 1)
                 a = random.choice([0, 1, 2, 3, 4, 5, 6])  # simple actions
@@ -267,7 +269,7 @@ def main(
             # reward shaping
             # r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
             if small and info["status"] != "small":
-                r += 15
+                r += 30
                 small = False
                 big_count += 1
             elif not small and info["status"] == "small":
@@ -333,7 +335,7 @@ def main(
         #    f"score: {cur_score}",
         # )
 
-        last_400_scores.append(cur_score)
+        last_400_x.append(cur_x)
         max_score = max(max_score, cur_score)
         min_score = min(min_score, cur_score)
         # prev_mean_score = mean_score
@@ -347,8 +349,8 @@ def main(
             # 20 for train, 130 for no train, 150 for pure random
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
-                f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f} Big: {big_count} Green: {green_count}"
+                f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s |"
+                f" Max: {max_score}  Min: {min_score}  Mean_x: {mean_x:.2f}  Std_x: {std_x:.2f} | Big: {big_count} Green: {green_count}"
             )
             max_score = -10000000
             min_score = -max_score
