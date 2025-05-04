@@ -44,8 +44,8 @@ os.makedirs(recordings_dir, exist_ok=True)
 print(f"Created directory: {recordings_dir}")
 
 EPSILON_START = 1.0
-EPSILON_END = 0.01
-EPSILON_DECAY = 0.999999
+EPSILON_END = 0.05
+EPSILON_DECAY = 0.999995
 epsilon_base = 1
 
 
