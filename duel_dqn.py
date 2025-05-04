@@ -219,6 +219,7 @@ def main(
     start_time = time.perf_counter()
     step_count = 0
     max_stage = 1
+    big_count = 0
 
     last_400_scores = deque([0], maxlen=400)
     max_score = -10000000
@@ -235,6 +236,7 @@ def main(
         min_r = 0
         prev_x_pos = 0
         stay_count = 0
+        small = True
 
         while not done:
             mean_score = np.mean(last_400_scores)
@@ -261,7 +263,18 @@ def main(
             # min_r = min(min_r, r)
 
             # reward shaping
-            r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
+            # r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
+            if small and info["status"] != "small":
+                r += 15
+                small = False
+                big_count += 1
+            elif not small and info["status"] == "small":
+                # should be handled by env
+                # r -= 15
+                small = True
+
+            r /= 15
+
             # r [-3.015, 3.015]
             # print(s.dtype) #float32
 
@@ -328,7 +341,7 @@ def main(
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f}"
+                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f} Big: {big_count}"
             )
             max_score = -10000000
             min_score = -max_score
@@ -337,6 +350,7 @@ def main(
             start_time = time.perf_counter()
             step_count = 0
             max_stage = 1
+            big_count = 0
 
         # TODO: run three lives
         if k % eval_interval == 0:
