@@ -248,7 +248,7 @@ def main(
             epsilon = max(epsilon * EPSILON_DECAY, EPSILON_END)
             if random.random() < epsilon:
                 # a = random.randint(0, env.action_space.n - 1)
-                a = random.choice([0, 1, 2, 3, 4, 5])  # simple actions
+                a = random.choice([0, 1, 2, 3, 4, 5, 6])  # simple actions
             else:
                 with torch.no_grad():
                     s_expanded = normalize(s).unsqueeze(0)
