@@ -17,12 +17,14 @@ def getch():
     return ch
 
 
-env = gym_super_mario_bros.make("SuperMarioBros-v0")
+# env = gym_super_mario_bros.make("SuperMarioBros-v0")
+env = gym_super_mario_bros.make("SuperMarioBrosRandomStages-v0", stages=["1-2"])
 env = JoypadSpace(env, SIMPLE_MOVEMENT)
 
 
 env.reset()
 env.render()
+# print(env.unwrapped._get_info())
 done = False
 score = 0
 print(SIMPLE_MOVEMENT)
@@ -32,12 +34,18 @@ while not done:
         action = int(action)
     else:
         action = 0
+    total_reward = 0
     for i in range(4):
-        _, reward, done, _ = env.step(action)
-        print()
-        print(reward)
-        if done:
+        _, reward, done, info = env.step(action)
+        total_reward += reward
+        if info["life"] < 2:
             break
-    score += reward
+    print()
+    print(info)
+    print(total_reward)
+    score += total_reward
+    if info["life"] < 2:
+        print("Game Over")
+        break
     env.render()
-
+print("Score: ", score)
