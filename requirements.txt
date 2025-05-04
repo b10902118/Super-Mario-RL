@@ -4,7 +4,7 @@ torchvision
 torchrl==0.5.0
 gym==0.23.1
 nes-py
-gym-super-mario-bros==7.4.0
+gym_super_mario_bros
 opencv-python
 matplotlib
 imageio

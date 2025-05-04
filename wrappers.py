@@ -51,27 +51,6 @@ class NoopResetEnv(gym.Wrapper):
         return self.env.step(ac)
 
 
-class FireResetEnv(gym.Wrapper):
-    def __init__(self, env):
-        """Take action on reset for environments that are fixed until firing."""
-        gym.Wrapper.__init__(self, env)
-        assert env.unwrapped.get_action_meanings()[1] == "FIRE"
-        assert len(env.unwrapped.get_action_meanings()) >= 3
-
-    def reset(self, **kwargs):
-        self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(1)
-        if done:
-            self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(2)
-        if done:
-            self.env.reset(**kwargs)
-        return obs
-
-    def step(self, ac):
-        return self.env.step(ac)
-
-
 class EpisodicLifeEnv(gym.Wrapper):
     def __init__(self, env):
         """Make end-of-life == end-of-episode, but only reset on true game over.
@@ -180,14 +159,13 @@ class WarpFrame(gym.ObservationWrapper):
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
-        self.mask = np.ones((84,84), dtype=np.int8)
-        
-    
+        self.mask = np.ones((84, 84), dtype=np.int8)
+
         # Set the regions of interest to 0 (black) in the mask
-        regions_to_mask = [(7,5,17,6), (28, 7, 11, 4), (66,5,10,6)]
+        regions_to_mask = [(7, 5, 17, 6), (28, 7, 11, 4), (66, 5, 10, 6)]
         for region in regions_to_mask:
             x, y, w, h = region
-            self.mask[y:y+h, x:x+w] = 0
+            self.mask[y : y + h, x : x + w] = 0
 
     def observation(self, obs):
         if self._key is None:
@@ -346,24 +324,6 @@ def make_atari(env_id, max_episode_steps=None):
     return env
 
 
-def wrap_deepmind(
-    env, episode_life=True, clip_rewards=True, frame_stack=True, scale=True
-):
-    """Configure environment for DeepMind-style Atari."""
-    if episode_life:
-        env = EpisodicLifeEnv(env)
-    if "FIRE" in env.unwrapped.get_action_meanings():
-        env = FireResetEnv(env)
-    env = WarpFrame(env)
-    if scale:
-        env = ScaledFloatFrame(env)
-    if clip_rewards:
-        env = ClipRewardEnv(env)
-    if frame_stack:
-        env = FrameStack(env, 4)
-    return env
-
-
 class EpisodicLifeMario(gym.Wrapper):
     def __init__(self, env):
         """Make end-of-life == end-of-episode, but only reset on true game over.
@@ -410,11 +370,10 @@ def wrap_mario_lazy(env):
 
 
 def wrap_mario(env):
-    env = NoopResetEnv(env, noop_max=30)
+    env = NoopResetEnv(env, noop_max=30)  # comment to make deterministic
     env = MaxAndSkipEnv(env, skip=4)
     env = EpisodicLifeMario(env)
     env = WarpFrame(env)
-    env = ScaledFloatFrame(env)
-    # env = custom_reward(env)
+    # env = ScaledFloatFrame(env)
     env = FrameStack(env, 4)
     return env

@@ -5,6 +5,7 @@ import sys
 import tty
 import termios
 
+
 def getch():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -14,6 +15,7 @@ def getch():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
+
 
 env = gym_super_mario_bros.make("SuperMarioBros-v0")
 env = JoypadSpace(env, SIMPLE_MOVEMENT)
@@ -32,7 +34,10 @@ while not done:
         action = 0
     for i in range(4):
         _, reward, done, _ = env.step(action)
+        print()
+        print(reward)
         if done:
             break
     score += reward
     env.render()
+

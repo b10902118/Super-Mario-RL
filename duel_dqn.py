@@ -46,7 +46,7 @@ print(f"Created directory: {recordings_dir}")
 EPSILON_START = 1.0
 EPSILON_END = 0.01
 EPSILON_DECAY = 0.9999
-epsilon_base = 1 
+epsilon_base = 1
 
 
 class model(nn.Module):
@@ -102,6 +102,10 @@ class model(nn.Module):
         self.v.reset_noise()
 
 
+def normalize(x):
+    return x.to(torch.float32) / 255.0
+
+
 def train(q, q_target, replay_buffer, prioritize, batch_size, gamma, optimizer):
     # s, r, a, s_prime, done = list(map(list, zip(*memory.sample(batch_size))))
     if prioritize:
@@ -116,6 +120,8 @@ def train(q, q_target, replay_buffer, prioritize, batch_size, gamma, optimizer):
         batch["s_prime"],
         batch["done"],
     )
+    s = normalize(s)
+    s_prime = normalize(s_prime)
 
     # print(type(s), type(r), type(a), type(s_prime), type(done))
     # print(s.shape, r.shape, a.shape, s_prime.shape, done.shape)
@@ -152,7 +158,8 @@ def hard_update(q, q_target):
     q_dict = q.state_dict()
     q_target.load_state_dict(q_dict)
 
-def get_epsilon(cur_score,mean_score, std_score):
+
+def get_epsilon(cur_score, mean_score, std_score):
     global epsilon_base
     # decide epsilon
     # safety check
@@ -162,15 +169,17 @@ def get_epsilon(cur_score,mean_score, std_score):
         if cur_score < mean_score:
             epsilon = 0.1 * (cur_score / mean_score)
         else:
-            epsilon =  1
-    # multi-stage linear 
+            epsilon = 1
+    # multi-stage linear
     elif cur_score < mean_score:
         epsilon = 0.04 * (cur_score / mean_score)
     elif mean_score + std_score > cur_score > mean_score:
         epsilon = 0.04 + (cur_score - mean_score) / std_score * 0.06
     else:
-        epsilon = 0.1 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.1
-    
+        epsilon = (
+            0.1 + min((cur_score - mean_score - std_score), std_score) / std_score * 0.1
+        )
+
     epsilon += epsilon_base
     epsilon_base *= EPSILON_DECAY
     return min(1, epsilon)
@@ -186,7 +195,7 @@ def main(
     bufsize,
     soft,
     no_prio,
-    epsilon_greedy,
+    epsilon_greedy,  # always
     gamma,
     alpha=0.6,
     beta=0.4,
@@ -195,18 +204,11 @@ def main(
     t = 0
     batch_size = 256
 
-    prioritize = not no_prio
-    if prioritize:
-        replay_buffer = ReplayBuffer(
-            storage=LazyTensorStorage(bufsize, device=device),
-            sampler=PrioritizedSampler(bufsize, alpha, beta),
-            batch_size=batch_size,
-        )
-    else:
-        replay_buffer = ReplayBuffer(
-            storage=LazyTensorStorage(bufsize, device=device),
-            batch_size=batch_size,
-        )
+    prioritize = False
+    replay_buffer = ReplayBuffer(
+        storage=LazyTensorStorage(bufsize, device=device),
+        batch_size=batch_size,
+    )
 
     eval_interval = 100
     save_interval = 1000
@@ -218,49 +220,52 @@ def main(
     step_count = 0
     max_stage = 1
 
-    last_400_scores = deque([0],maxlen=400)
+    last_400_scores = deque([0], maxlen=400)
 
     for k in range(1, episodes + 1):
         s = env.reset()
+        s = torch.from_numpy(s).to(device)
         done = False
         cur_score = 0
+        prev_x_pos = 0
+        stay_count = 0
 
         while not done:
-            if epsilon_greedy:
-                epsilon = get_epsilon(cur_score, np.mean(last_400_scores), np.std(last_400_scores))
-                if random.random() < epsilon:
-                    # a = random.randint(0, env.action_space.n - 1)
-                    a = random.choice([1, 2, 3, 4])
-                else:
-                    with torch.no_grad():
-                        s_expanded = np.expand_dims(s, 0)
-                        a = q(torch.from_numpy(s_expanded).to(device)).argmax().item()
+            mean_score = np.mean(last_400_scores)
+            std_score = np.std(last_400_scores)
 
+            epsilon = get_epsilon(cur_score, mean_score, std_score)
+            if random.random() < epsilon:
+                # a = random.randint(0, env.action_space.n - 1)
+                a = random.choice([0, 1, 2, 3, 4, 5])  # simple actions
             else:
                 with torch.no_grad():
-                    s_expanded = np.expand_dims(s, 0)
-                    a = q(torch.from_numpy(s_expanded).to(device)).argmax().item()
+                    s_expanded = normalize(s).unsqueeze(0)
+                    a = q(s_expanded).argmax().item()
 
-            s_prime, r, done, info = env.step(a)
+            s_next, r, done, info = env.step(a)
+            s_next = torch.from_numpy(s_next).to(device)
             # {'coins': 2, 'flag_get': False, 'life': 0, 'score': 400, 'stage': 1, 'status': 'small', 'time': 398, 'world': 1, 'x_pos': 99, 'y_pos': 79}
             total_score += r
             cur_score += r
 
             # reward shaping
+            # TODO: penalize staying at the same x
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
+            # print(r) [-2, 2]
             # print(s.dtype) #float32
 
             # minimal speed drop (71 -> 68), TensorDict no gain
             replay_buffer.add(
                 {
-                    "s": torch.from_numpy(s),
+                    "s": s,
                     "r": torch.tensor(r, dtype=torch.float32),
                     "a": torch.tensor(a, dtype=torch.long),  # indexing
-                    "s_prime": torch.from_numpy(s_prime),
+                    "s_prime": s_next,
                     "done": torch.tensor(done, dtype=torch.int32),
                 }
             )
-            s = s_prime
+            s = s_next
             # TODO: increase epsilon for new stage
             cur_stage = env.unwrapped._stage
             max_stage = max(max_stage, cur_stage)
@@ -277,6 +282,14 @@ def main(
 
             step_count += 1
 
+            if prev_x_pos == info["x_pos"]:
+                stay_count += 1
+                if stay_count > 15:
+                    break
+            else:
+                stay_count = 0
+                prev_x_pos = info["x_pos"]
+
             # if step_count == 512:
             #    time_spent = time.perf_counter() - start_time
             #    print(f"Speed: {step_count / time_spent} steps/s")
@@ -284,11 +297,11 @@ def main(
             #    start_time = time.perf_counter()
 
         last_400_scores.append(cur_score)
-        #prev_mean_score = mean_score
-        #mean_score = ((k - 1) * mean_score + cur_score) / k
-        #prev_Ex2 = std_score**2 + prev_mean_score**2
-        #Ex2 = ((k - 1) * prev_Ex2 + cur_score**2) / k
-        #std_score = math.sqrt(Ex2 - mean_score**2)
+        # prev_mean_score = mean_score
+        # mean_score = ((k - 1) * mean_score + cur_score) / k
+        # prev_Ex2 = std_score**2 + prev_mean_score**2
+        # Ex2 = ((k - 1) * prev_Ex2 + cur_score**2) / k
+        # std_score = math.sqrt(Ex2 - mean_score**2)
 
         if k % print_interval == 0:
             time_spent = time.perf_counter() - start_time
@@ -296,7 +309,7 @@ def main(
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                + (f" | Mean: {np.mean(last_400_scores):.2f}  Std: {np.std(last_400_scores):.2f}" if epsilon_greedy else "")
+                f" | Mean: {mean_score:.2f}  Max: {max(last_400_scores)}  Min: {min(last_400_scores)}  Std: {std_score:.2f}"
             )
             total_score = 0
             loss = 0.0
@@ -304,6 +317,7 @@ def main(
             step_count = 0
             max_stage = 1
 
+        # TODO: run three lives
         if k % eval_interval == 0:
             frames = []
             done = False
@@ -311,28 +325,21 @@ def main(
             q.eval()
             score = 0
             while not done:
-                frames.append(s[3] * 255)
+                frames.append(s[3])
                 # frames.append(env.render(mode="rgb_array"))
                 with torch.no_grad():
-                    s_expanded = np.expand_dims(s, 0)
-                    a = (
-                        q(torch.tensor(s_expanded, dtype=torch.float32).to(device))
-                        .argmax()
-                        .item()
-                    )
-                s_prime, r, done, _ = env.step(a)
+                    s_tensor = torch.from_numpy(s).to(device)
+                    s_expanded = normalize(s_tensor).unsqueeze(0)
+                    a = q(s_expanded).argmax().item()
+                s_next, r, done, _ = env.step(a)
                 score += r
-                s = s_prime
+                s = s_next
             filepath = os.path.join(recordings_dir, f"{k}.gif")
             imageio.mimsave(filepath, frames)
             print(f"Score {score}, Saved gif to {filepath}")
             q.train()
         if k % save_interval == 0:
             torch.save(q.state_dict(), os.path.join(recordings_dir, "mario_q.pth"))
-            torch.save(
-                q_target.state_dict(),
-                os.path.join(recordings_dir, "mario_q_target.pth"),
-            )
 
 
 import argparse
@@ -348,7 +355,7 @@ if __name__ == "__main__":
         "--episodes", type=int, default=10000, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--bufsize", type=int, default=50000, help="Buffer size for replay buffer"
+        "--bufsize", type=int, default=100000, help="Buffer size for replay buffer"
     )
     parser.add_argument(
         "--soft",
@@ -359,13 +366,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-prio",
         action="store_true",
-        default=False,
+        default=True,
         help="Use prioritized replay buffer",
     )
     parser.add_argument(
         "--eps",
         action="store_true",
-        default=False,
+        default=True,
         help="Use noisy layers for exploration",
     )
     parser.add_argument(
@@ -381,7 +388,7 @@ if __name__ == "__main__":
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     # env = JoypadSpace(env, COMPLEX_MOVEMENT)
-    env = JoypadSpace(env, SIMPLE_MOVEMENT)
+    env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = wrap_mario(env)
     # print(f"{env.action_space.n=}") # 12
     q = model(n_frame, env.action_space.n, not args.eps, device).to(device)

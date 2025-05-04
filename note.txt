@@ -1,2 +1,11 @@
 hidden green mushroom
 https://www.youtube.com/watch?v=nD4-XnWfK9s
+
+
+TODO:
+fix seed for eval achieve exactly same score?
+
+prevent stuck by x coordinate.
+reward shaping
+selectively add to replay buffer by advantage (prioritized sampling)
+action by coordinate experience? (speedup & prevent random causing early die)
