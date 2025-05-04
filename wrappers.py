@@ -353,7 +353,7 @@ class EpisodicLifeMario(gym.Wrapper):
             obs = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
-            obs, _, _, _ = self.env.step(0)
+            obs, _, _, info = self.env.step(0)
         self.lives = self.env.unwrapped._life
         return obs
 
@@ -370,7 +370,7 @@ def wrap_mario_lazy(env):
 
 
 def wrap_mario(env):
-    env = NoopResetEnv(env, noop_max=30)  # comment to make deterministic
+    # env = NoopResetEnv(env, noop_max=30)  # comment to make deterministic
     env = MaxAndSkipEnv(env, skip=4)
     env = EpisodicLifeMario(env)
     env = WarpFrame(env)

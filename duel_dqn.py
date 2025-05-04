@@ -45,7 +45,7 @@ print(f"Created directory: {recordings_dir}")
 
 EPSILON_START = 1.0
 EPSILON_END = 0.01
-EPSILON_DECAY = 0.9999
+EPSILON_DECAY = 0.999999
 epsilon_base = 1
 
 
@@ -194,7 +194,7 @@ def main(
     episodes,
     bufsize,
     soft,
-    no_prio,
+    no_prio,  # always
     epsilon_greedy,  # always
     gamma,
     alpha=0.6,
@@ -221,12 +221,18 @@ def main(
     max_stage = 1
 
     last_400_scores = deque([0], maxlen=400)
+    max_score = -10000000
+    min_score = -max_score
+    epsilon = EPSILON_START
 
     for k in range(1, episodes + 1):
         s = env.reset()
         s = torch.from_numpy(s).to(device)
         done = False
         cur_score = 0
+        max_x = 0
+        max_r = 0
+        min_r = 0
         prev_x_pos = 0
         stay_count = 0
 
@@ -234,7 +240,8 @@ def main(
             mean_score = np.mean(last_400_scores)
             std_score = np.std(last_400_scores)
 
-            epsilon = get_epsilon(cur_score, mean_score, std_score)
+            # epsilon = get_epsilon(cur_score, mean_score, std_score)
+            epsilon = max(epsilon * EPSILON_DECAY, EPSILON_END)
             if random.random() < epsilon:
                 # a = random.randint(0, env.action_space.n - 1)
                 a = random.choice([0, 1, 2, 3, 4, 5])  # simple actions
@@ -246,13 +253,16 @@ def main(
             s_next, r, done, info = env.step(a)
             s_next = torch.from_numpy(s_next).to(device)
             # {'coins': 2, 'flag_get': False, 'life': 0, 'score': 400, 'stage': 1, 'status': 'small', 'time': 398, 'world': 1, 'x_pos': 99, 'y_pos': 79}
+            # r [-15, 15]
             total_score += r
             cur_score += r
+            # max_x = max(max_x, info["x_pos"])
+            # max_r = max(max_r, r)
+            # min_r = min(min_r, r)
 
             # reward shaping
-            # TODO: penalize staying at the same x
             r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
-            # print(r) [-2, 2]
+            # r [-3.015, 3.015]
             # print(s.dtype) #float32
 
             # minimal speed drop (71 -> 68), TensorDict no gain
@@ -282,21 +292,30 @@ def main(
 
             step_count += 1
 
-            if prev_x_pos == info["x_pos"]:
-                stay_count += 1
-                if stay_count > 15:
-                    break
-            else:
-                stay_count = 0
-                prev_x_pos = info["x_pos"]
+            # if prev_x_pos == info["x_pos"]:
+            #    stay_count += 1
+            #    if stay_count > 15:
+            #        break
+            # else:
+            #    stay_count = 0
+            #    prev_x_pos = info["x_pos"]
 
             # if step_count == 512:
             #    time_spent = time.perf_counter() - start_time
             #    print(f"Speed: {step_count / time_spent} steps/s")
             #    step_count = 0
             #    start_time = time.perf_counter()
+        # print(
+        #    f"episode {k} result: ",
+        #    f"{max_x=}",
+        #    f"{max_r=}",
+        #    f"{min_r=}",
+        #    f"score: {cur_score}",
+        # )
 
         last_400_scores.append(cur_score)
+        max_score = max(max_score, cur_score)
+        min_score = min(min_score, cur_score)
         # prev_mean_score = mean_score
         # mean_score = ((k - 1) * mean_score + cur_score) / k
         # prev_Ex2 = std_score**2 + prev_mean_score**2
@@ -309,8 +328,10 @@ def main(
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                f" | Mean: {mean_score:.2f}  Max: {max(last_400_scores)}  Min: {min(last_400_scores)}  Std: {std_score:.2f}"
+                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f}"
             )
+            max_score = -10000000
+            min_score = -max_score
             total_score = 0
             loss = 0.0
             start_time = time.perf_counter()
@@ -352,7 +373,7 @@ if __name__ == "__main__":
         "--lr", type=float, default=0.0002, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--episodes", type=int, default=10000, help="Learning rate for the optimizer"
+        "--episodes", type=int, default=20000, help="Learning rate for the optimizer"
     )
     parser.add_argument(
         "--bufsize", type=int, default=100000, help="Buffer size for replay buffer"
