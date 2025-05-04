@@ -220,6 +220,7 @@ def main(
     step_count = 0
     max_stage = 1
     big_count = 0
+    green_count = 0
 
     last_400_scores = deque([0], maxlen=400)
     max_score = -10000000
@@ -237,6 +238,7 @@ def main(
         prev_x_pos = 0
         stay_count = 0
         small = True
+        life = env.unwrapped._life
 
         while not done:
             mean_score = np.mean(last_400_scores)
@@ -272,6 +274,11 @@ def main(
                 # should be handled by env
                 # r -= 15
                 small = True
+            
+            if info['life'] > life:
+                r += 120
+                life = info['life']
+                green_count += 1
 
             r /= 15
 
@@ -341,7 +348,7 @@ def main(
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s | Learning Rate: {scheduler.get_last_lr()[0]:.6f}"
-                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f} Big: {big_count}"
+                f" Epsilon: {epsilon:.3f} | Max: {max_score}  Min: {min_score}  Mean: {mean_score:.2f}  Std: {std_score:.2f} Big: {big_count} Green: {green_count}"
             )
             max_score = -10000000
             min_score = -max_score
@@ -351,6 +358,7 @@ def main(
             step_count = 0
             max_stage = 1
             big_count = 0
+            green_count = 0
 
         # TODO: run three lives
         if k % eval_interval == 0:
