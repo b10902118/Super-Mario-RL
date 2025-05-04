@@ -274,10 +274,10 @@ def main(
                 # should be handled by env
                 # r -= 15
                 small = True
-            
-            if info['life'] > life:
+
+            if info["life"] > life and info["life"] != 255:
                 r += 120
-                life = info['life']
+                life = info["life"]
                 green_count += 1
 
             r /= 15
