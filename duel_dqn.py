@@ -388,9 +388,10 @@ def main(
             imageio.mimsave(filepath, frames)
             print(f"Score {score}, Saved gif to {filepath}")
             q.train()
-            torch.save(
-                q.state_dict(), os.path.join(recordings_dir, f"mario_q_{score}.pth")
-            )
+            if score > 3500:
+                torch.save(
+                    q.state_dict(), os.path.join(recordings_dir, f"mario_q_{score}.pth")
+                )
 
 
 import argparse
@@ -435,7 +436,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--eps-base",
         type=float,
-        default=1,
+        default=0,
         help="Base epsilon for epsilon-greedy exploration",
     )
     parser.add_argument(
@@ -445,6 +446,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--xstd",
         type=float,
+    )
+    parser.add_argument(
+        "--weight",
+        required=True,
+        type=str,
     )
     args = parser.parse_args()
     args_dict = vars(args)
@@ -460,7 +466,7 @@ if __name__ == "__main__":
     q = model(n_frame, env.action_space.n, not args.eps, device).to(device)
     q_target = model(n_frame, env.action_space.n, not args.eps, device).to(device)
 
-    q.load_state_dict(torch.load("mario_q.pth", weights_only=True))
+    q.load_state_dict(torch.load(args.weight, weights_only=True))
     q_target.load_state_dict(q.state_dict())
 
     # q.compile()
@@ -475,6 +481,7 @@ if __name__ == "__main__":
     args_dict["epsilon_greedy"] = args_dict.pop("eps")
     args_dict.pop("lr")
     args_dict.pop("eps_base")
+    args_dict.pop("weight")
 
     training_start_time = time.perf_counter()
     main(env, q, q_target, optimizer, scheduler, **args_dict)
