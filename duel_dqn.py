@@ -45,7 +45,7 @@ print(f"Created directory: {recordings_dir}")
 
 EPSILON_START = 1.0
 EPSILON_END = 0.01
-EPSILON_DECAY = 0.9999  # 992
+EPSILON_DECAY = 0.99995  # 992
 epsilon_base = 1
 
 
@@ -167,15 +167,15 @@ def get_epsilon(cur_x, mean_x, std_x):
         epsilon = 1
     # multi-stage linear
     elif cur_x < mean_x:
-        epsilon = 0.04 * (cur_x / mean_x)
+        epsilon = 0.01 * (cur_x / mean_x)
 
     # safety check
     elif std_x == 0:
         epsilon = 1
     elif mean_x + std_x > cur_x > mean_x:
-        epsilon = 0.04 + (cur_x - mean_x) / std_x * 0.06
+        epsilon = 0.01 + (cur_x - mean_x) / std_x * 0.02
     else:
-        epsilon = 0.1 + min((cur_x - mean_x - std_x), std_x) / std_x * 0.1
+        epsilon = 0.03 + min((cur_x - mean_x - std_x), std_x) / std_x * 0.02
 
     epsilon += epsilon_base
     epsilon_base *= EPSILON_DECAY
@@ -400,7 +400,7 @@ if __name__ == "__main__":
         "--episodes", type=int, default=20000, help="Learning rate for the optimizer"
     )
     parser.add_argument(
-        "--bufsize", type=int, default=100000, help="Buffer size for replay buffer"
+        "--bufsize", type=int, default=50000, help="Buffer size for replay buffer"
     )
     parser.add_argument(
         "--soft",
@@ -426,10 +426,17 @@ if __name__ == "__main__":
         default=0.63,
         help="Discount factor for the Q-learning update",
     )
+    parser.add_argument(
+        "--eps-base",
+        type=float,
+        default=1,
+        help="Base epsilon for epsilon-greedy exploration",
+    )
     args = parser.parse_args()
     args_dict = vars(args)
     print(args_dict)
 
+    epsilon_base = args.eps_base
     n_frame = 4
     env = gym_super_mario_bros.make("SuperMarioBros-v0")
     # env = JoypadSpace(env, COMPLEX_MOVEMENT)
@@ -438,6 +445,9 @@ if __name__ == "__main__":
     # print(f"{env.action_space.n=}") # 12
     q = model(n_frame, env.action_space.n, not args.eps, device).to(device)
     q_target = model(n_frame, env.action_space.n, not args.eps, device).to(device)
+
+    q.load_state_dict(torch.load("mario_q.pth", weights_only=True))
+    q_target.load_state_dict(q.state_dict())
 
     # q.compile()
     # q_target.compile()
@@ -450,6 +460,7 @@ if __name__ == "__main__":
 
     args_dict["epsilon_greedy"] = args_dict.pop("eps")
     args_dict.pop("lr")
+    args_dict.pop("eps_base")
 
     training_start_time = time.perf_counter()
     main(env, q, q_target, optimizer, scheduler, **args_dict)

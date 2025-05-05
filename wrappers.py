@@ -100,6 +100,7 @@ class MaxAndSkipEnv(gym.Wrapper):
         """Repeat action, sum reward, and max over last observations."""
         total_reward = 0.0
         done = None
+        lives = self.env.unwrapped._life
         for i in range(self._skip):
             obs, reward, done, info = self.env.step(action)
             if i == self._skip - 2:
@@ -107,7 +108,7 @@ class MaxAndSkipEnv(gym.Wrapper):
             if i == self._skip - 1:
                 self._obs_buffer[1] = obs
             total_reward += reward
-            if done:
+            if done or info["life"] < lives:
                 break
         # Note that the observation on the done=True frame
         # doesn't matter
