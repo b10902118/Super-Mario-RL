@@ -7,10 +7,12 @@ from nes_py.wrappers import JoypadSpace
 import math
 import torch
 import torch.nn as nn
+import imageio
 
 from wrappers import *
 
 device = "cuda"
+
 
 class model(nn.Module):
     def __init__(self, n_frame, n_action, noisy, device):
@@ -54,6 +56,7 @@ class model(nn.Module):
 
         return q
 
+
 def normalize(x):
     return x.to(torch.float32) / 255.0
 
@@ -63,17 +66,16 @@ env = gym_super_mario_bros.make("SuperMarioBros-v0")
 env = JoypadSpace(env, COMPLEX_MOVEMENT)
 env = wrap_mario(env)
 q = model(n_frame, env.action_space.n, False, device).to(device)
-q.load_state_dict(torch.load("../DRL-Assignment-3/model.pth", weights_only=True))
+q.load_state_dict(torch.load("4176.pth", weights_only=True))
 
 
-#frames = []
+frames = []
 done = False
 s = env.reset(force=True)
-#q.eval()
+# q.eval()
 score = 0
 while not done:
-    # frames.append(s[3])
-    # frames.append(env.render(mode="rgb_array"))
+    frames.append(s[3])
     with torch.no_grad():
         s_tensor = torch.from_numpy(s).to(device)
         s_expanded = normalize(s_tensor).unsqueeze(0)
@@ -81,7 +83,7 @@ while not done:
     s_next, r, done, _ = env.step(a)
     score += r
     s = s_next
-#filepath = os.path.join(recordings_dir, f"{k}.gif")
-#imageio.mimsave(filepath, frames)
-print(f"Score {score}")# Saved gif to {filepath}")
-#q.train()
+filepath = "4176.gif"  # os.path.join(recordings_dir, "4176.gif")
+imageio.mimsave(filepath, frames)
+print(f"Score {score}")  # Saved gif to {filepath}")
+# q.train()

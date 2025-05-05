@@ -214,9 +214,9 @@ def main(
         batch_size=batch_size,
     )
 
-    eval_interval = 10
+    eval_interval = 1
     save_interval = 1000
-    print_interval = 10
+    print_interval = 50
 
     total_score = 0.0
     loss = 0.0
