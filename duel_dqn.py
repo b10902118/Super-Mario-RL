@@ -199,6 +199,8 @@ def main(
     no_prio,  # always
     epsilon_greedy,  # always
     gamma,
+    xmean=None,
+    xstd=None,
     alpha=0.6,
     beta=0.4,
     hard_update_interval=50,
@@ -212,9 +214,9 @@ def main(
         batch_size=batch_size,
     )
 
-    eval_interval = 100
+    eval_interval = 10
     save_interval = 1000
-    print_interval = 50
+    print_interval = 10
 
     total_score = 0.0
     loss = 0.0
@@ -224,10 +226,13 @@ def main(
     big_count = 0
     green_count = 0
 
-    last_400_x = deque([0], maxlen=400)
+    if not xmean:
+        history = [0]
+    else:
+        history = np.random.normal(loc=xmean, scale=xstd, size=400).tolist()
+    last_400_x = deque(history, maxlen=400)
     max_score = -10000000
     min_score = -max_score
-    epsilon = EPSILON_START
 
     for k in range(1, episodes + 1):
         s = env.reset()
@@ -383,8 +388,9 @@ def main(
             imageio.mimsave(filepath, frames)
             print(f"Score {score}, Saved gif to {filepath}")
             q.train()
-        if k % save_interval == 0:
-            torch.save(q.state_dict(), os.path.join(recordings_dir, "mario_q.pth"))
+            torch.save(
+                q.state_dict(), os.path.join(recordings_dir, f"mario_q_{score}.pth")
+            )
 
 
 import argparse
@@ -431,6 +437,14 @@ if __name__ == "__main__":
         type=float,
         default=1,
         help="Base epsilon for epsilon-greedy exploration",
+    )
+    parser.add_argument(
+        "--xmean",
+        type=float,
+    )
+    parser.add_argument(
+        "--xstd",
+        type=float,
     )
     args = parser.parse_args()
     args_dict = vars(args)
