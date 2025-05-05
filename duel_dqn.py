@@ -245,16 +245,14 @@ def main(
 
         while not done:
             cur_x = calc_x(info["x_pos"], info["stage"])
-            mean_x = np.mean(last_400_x)
-            std_x = np.std(last_400_x)
-            epsilon = get_epsilon(cur_x, mean_x, std_x)
-            if random.random() < epsilon:
-                # a = random.randint(0, env.action_space.n - 1)
-                a = random.choice([0, 1, 2, 3, 4, 5, 6])  # simple actions
-            else:
-                with torch.no_grad():
-                    s_expanded = normalize(s).unsqueeze(0)
-                    a = q(s_expanded).argmax().item()
+            # epsilon = get_epsilon(cur_x, mean_x, std_x)
+            # if random.random() < epsilon:
+            #    # a = random.randint(0, env.action_space.n - 1)
+            #    a = random.choice([0, 1, 2, 3, 4, 5, 6])  # simple actions
+            # else:
+            with torch.no_grad():
+                s_expanded = normalize(s).unsqueeze(0)
+                a = q(s_expanded).argmax().item()
 
             s_next, r, done, info = env.step(a)
             s_next = torch.from_numpy(s_next).to(device)
@@ -268,19 +266,19 @@ def main(
 
             # reward shaping
             # r = np.sign(r) * (np.sqrt(abs(r) + 1) - 1) + 0.001 * r
-            if small and info["status"] != "small":
-                r += 30
-                small = False
-                big_count += 1
-            elif not small and info["status"] == "small":
-                # should be handled by env
-                # r -= 15
-                small = True
+            # if small and info["status"] != "small":
+            #    r += 30
+            #    small = False
+            #    big_count += 1
+            # elif not small and info["status"] == "small":
+            #    # should be handled by env
+            #    # r -= 15
+            #    small = True
 
-            if info["life"] > life and info["life"] != 255:
-                r += 120
-                life = info["life"]
-                green_count += 1
+            # if info["life"] > life and info["life"] != 255:
+            #    r += 120
+            #    life = info["life"]
+            #    green_count += 1
 
             r /= 15
 
@@ -347,6 +345,8 @@ def main(
         if k % print_interval == 0:
             time_spent = time.perf_counter() - start_time
             # 20 for train, 130 for no train, 150 for pure random
+            mean_x = np.mean(last_400_x)
+            std_x = np.std(last_400_x)
             print(
                 f"Epoch: {k} | Score: {total_score / print_interval:.2f} | "
                 f"Loss: {loss / print_interval:.2f} | Stage: {max_stage} | Time Spent: {time_spent:.1f}| Speed: {step_count / time_spent:.1f} steps/s |"
